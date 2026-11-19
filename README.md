@@ -20,7 +20,7 @@ podman pull ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119
 podman pull docker.io/pulchart/amiga-fsuae-aros:20261118-20261119
 ```
 
-Pin CI to a tag with a build date. GHCR keeps the newest 10 versions of each image, Docker Hub keeps every copied tag. The labels `fedora.version`, `fsuae.version`, `amitools.version` and `aros.version` show what an image holds:
+Pin CI to a tag with a build date. GHCR keeps the newest 10 versions of each image, Docker Hub keeps every copied tag. The labels `fedora.version`, `fsuae.version`, `amitools.version`, `aros.version`, `build.date` and `org.opencontainers.image.revision` show what an image holds:
 
 ```sh
 podman image inspect ghcr.io/pulchart/amiga-fsuae-aros:latest --format '{{json .Labels}}'
@@ -34,7 +34,7 @@ podman image inspect ghcr.io/pulchart/amiga-fsuae-aros:latest --format '{{json .
 
 FS-UAE (RPM Fusion) and amitools (PyPI) take their newest release at every build. Tags and labels come from the versions found in the image.
 
-SourceForge drops nightlies after a few days, so merge the Renovate pull request while its nightly is there. A nightly without an amiga-m68k build fails with "has no amiga-m68k boot ISO" until Renovate moves on. The build checks the archive against the MD5 SourceForge publishes.
+SourceForge drops nightlies after a few days, so a pull request with a new `AROS_DATE` has to build while its nightly is there. A nightly without an amiga-m68k build fails with "has no amiga-m68k boot ISO" until Renovate moves on. The build checks the archive against the MD5 SourceForge publishes.
 
 ## Use
 
@@ -62,9 +62,13 @@ podman build --target test .    # boots AROS, checks it ran its Startup-Sequence
 
 | workflow | when | does |
 |---|---|---|
-| `Images` | pull request | lint, build, `test` stage; a pull request from this repository also pushes `amiga-fsuae-pr:pr-<number>` and `amiga-fsuae-aros-pr:pr-<number>`, closing it deletes them |
-| | `master`, manual on `master` | also tags, pushes to GHCR with `GITHUB_TOKEN`, attests provenance, keeps 10 versions |
+| `Images` | pull request | lint, build, `test` stage, labels; a pull request from this repository also pushes `amiga-fsuae-pr:pr-<number>` and `amiga-fsuae-aros-pr:pr-<number>` and attests them |
+| | pull request from this repository merged into `master` | copies the tested `pr-<number>` images to the release tags, same digests, keeps 10 versions |
+| | pull request closed | deletes its `pr-<number>` images |
+| | manual on `master` | builds and publishes the release tags directly, e.g. for a newer FS-UAE without a pull request |
 | `Copy to Docker Hub` | manual, owner, `master` | copies `latest` and the version tags with `skopeo sync`; the only user of the Docker Hub token |
+
+The release images are the ones the pull request tested, so a pull request must be up to date with `master` before it merges.
 
 Check where an image was built:
 
