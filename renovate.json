@@ -1,0 +1,59 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "group:all"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "FEDORA_VERSION and AROS_DATE in the Containerfile",
+      "managerFilePatterns": [
+        "/^Containerfile$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nARG \\w+=(?<currentValue>\\S+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Lint tool images run in the workflows",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.yml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>(?:docker|ghcr)\\.io/[^:\\s\"]+):(?<currentValue>v?\\d[^\\s\"]*)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "customDatasources": {
+    "aros-nightly": {
+      "defaultRegistryUrlTemplate": "https://sourceforge.net/projects/aros/files/nightly2/",
+      "format": "html"
+    }
+  },
+  "packageRules": [
+    {
+      "description": "Fedora releases come from endoflife.date, the image tags also have prereleases",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "registry.fedoraproject.org/fedora"
+      ],
+      "enabled": false
+    },
+    {
+      "matchDatasources": [
+        "custom.aros-nightly"
+      ],
+      "extractVersion": "/nightly2/(?<version>\\d{8})/$",
+      "versioning": "regex:^(?<major>\\d{8})$"
+    }
+  ],
+  "schedule": [
+    "after 4am and before 8am"
+  ],
+  "timezone": "UTC"
+}
