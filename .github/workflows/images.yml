@@ -3,8 +3,6 @@ name: Images
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
-  push:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -17,12 +15,16 @@ defaults:
 # cancel older builds of a pull request, let master runs wait
 concurrency:
   group: images-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
 
 env:
   REGISTRY: ghcr.io/pulchart
   HADOLINT: docker.io/hadolint/hadolint:v2.15.1
   ACTIONLINT: docker.io/rhysd/actionlint:1.7.12
+  # a pull request from this repository, which may push and attest
+  OWN_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+  # a manual run on master, which publishes its own build
+  RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
 
 jobs:
   images:
@@ -54,88 +56,136 @@ jobs:
             echo "aros=$(podman image inspect amiga-fsuae-aros --format '{{index .Labels "aros.version"}}')"
             echo "date=$(date -u +%Y%m%d)"
           } | tee -a "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"
-      - name: Push the pull request images to GHCR
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR: ${{ github.event.number }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
-          for image in amiga-fsuae amiga-fsuae-aros; do
-            podman tag "$image" "$REGISTRY/$image-pr:pr-$PR"
-            podman push "$REGISTRY/$image-pr:pr-$PR"
-          done
-          podman logout ghcr.io
-      - name: Label, tag and push to GHCR
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-        id: push
+      - name: Label the images
         env:
           FEDORA: ${{ steps.v.outputs.fedora }}
           FSUAE: ${{ steps.v.outputs.fsuae }}
           AMITOOLS: ${{ steps.v.outputs.amitools }}
           AROS: ${{ steps.v.outputs.aros }}
           DATE: ${{ steps.v.outputs.date }}
+          REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          labels=(--label "fedora.version=$FEDORA" --label "fsuae.version=$FSUAE"
+                  --label "amitools.version=$AMITOOLS" --label "build.date=$DATE"
+                  --label "org.opencontainers.image.revision=$REVISION")
+          podman build --target base "${labels[@]}" --label "org.opencontainers.image.version=$FSUAE" -t amiga-fsuae .
+          podman build --target aros "${labels[@]}" --label "org.opencontainers.image.version=$AROS" -t amiga-fsuae-aros .
+      - name: Push to GHCR
+        if: env.OWN_PR == 'true' || env.RELEASE == 'true'
+        id: push
+        env:
+          PR: ${{ github.event.number }}
+          FSUAE: ${{ steps.v.outputs.fsuae }}
+          AROS: ${{ steps.v.outputs.aros }}
+          DATE: ${{ steps.v.outputs.date }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          labels=(--label "fedora.version=$FEDORA" --label "fsuae.version=$FSUAE" --label "amitools.version=$AMITOOLS")
-          podman build --target base "${labels[@]}" --label "org.opencontainers.image.version=$FSUAE" \
-            -t "$REGISTRY/amiga-fsuae:latest" .
-          podman build --target aros "${labels[@]}" --label "org.opencontainers.image.version=$AROS" \
-            -t "$REGISTRY/amiga-fsuae-aros:latest" .
+          # a pull request pushes pr-<number> to the -pr packages, merging it copies them
+          if [ "$OWN_PR" = true ]; then
+            fsuae=("$REGISTRY/amiga-fsuae-pr:pr-$PR")
+            aros=("$REGISTRY/amiga-fsuae-aros-pr:pr-$PR")
+          else
+            fsuae=("$REGISTRY/amiga-fsuae:"{"$FSUAE","$FSUAE-$DATE",latest})
+            aros=("$REGISTRY/amiga-fsuae-aros:"{"$AROS","$AROS-$DATE",latest})
+          fi
           podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
-          for tag in "$FSUAE" "$FSUAE-$DATE" latest; do
-            podman push --digestfile fsuae.digest "$REGISTRY/amiga-fsuae:latest" "$REGISTRY/amiga-fsuae:$tag"
+          for dest in "${fsuae[@]}"; do
+            podman push --digestfile fsuae.digest amiga-fsuae "$dest"
           done
-          for tag in "$AROS" "$AROS-$DATE" latest; do
-            podman push --digestfile aros.digest "$REGISTRY/amiga-fsuae-aros:latest" "$REGISTRY/amiga-fsuae-aros:$tag"
+          for dest in "${aros[@]}"; do
+            podman push --digestfile aros.digest amiga-fsuae-aros "$dest"
           done
           podman logout ghcr.io
           echo "fsuae=$(cat fsuae.digest)" >>"$GITHUB_OUTPUT"
           echo "aros=$(cat aros.digest)" >>"$GITHUB_OUTPUT"
       - name: Attest amiga-fsuae
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: steps.push.outcome == 'success'
         uses: actions/attest@v4
         with:
           subject-name: ghcr.io/pulchart/amiga-fsuae
           subject-digest: ${{ steps.push.outputs.fsuae }}
       - name: Attest amiga-fsuae-aros
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: steps.push.outcome == 'success'
         uses: actions/attest@v4
         with:
           subject-name: ghcr.io/pulchart/amiga-fsuae-aros
           subject-digest: ${{ steps.push.outputs.aros }}
       - name: Keep the newest 10 versions of amiga-fsuae
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: env.RELEASE == 'true'
         uses: actions/delete-package-versions@v5
         with:
           package-name: amiga-fsuae
           package-type: container
           min-versions-to-keep: 10
       - name: Keep the newest 10 versions of amiga-fsuae-aros
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: env.RELEASE == 'true'
         uses: actions/delete-package-versions@v5
         with:
           package-name: amiga-fsuae-aros
           package-type: container
           min-versions-to-keep: 10
 
-  # a closed pull request leaves no image: its pr-<number> versions and the
-  # untagged versions of the -pr packages go
-  cleanup:
+  # merged into master: the tested pull request images get the release tags;
+  # closed either way: the pr-<number> and untagged versions of the -pr
+  # packages go
+  closed:
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
       packages: write
     steps:
+      - name: Copy the pull request images to the release tags
+        if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
+        env:
+          PR: ${{ github.event.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
+          for image in amiga-fsuae amiga-fsuae-aros; do
+            src="docker://$REGISTRY/$image-pr:pr-$PR"
+            label() { skopeo inspect --format "{{index .Labels \"$1\"}}" "$src"; }
+            version=$(label org.opencontainers.image.version)
+            date=$(label build.date)
+            revision=$(label org.opencontainers.image.revision)
+            if [ -z "$version" ] || [ -z "$date" ] || [ "$revision" != "$HEAD" ]; then
+              echo "$src is not the tested build of $HEAD: version '$version', date '$date', revision '$revision'" >&2
+              exit 1
+            fi
+            for tag in "$version" "$version-$date" latest; do
+              skopeo copy --preserve-digests "$src" "docker://$REGISTRY/$image:$tag"
+            done
+          done
+          skopeo logout ghcr.io
+      - name: Keep the newest 10 versions of amiga-fsuae
+        if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: amiga-fsuae
+          package-type: container
+          min-versions-to-keep: 10
+      - name: Keep the newest 10 versions of amiga-fsuae-aros
+        if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: amiga-fsuae-aros
+          package-type: container
+          min-versions-to-keep: 10
       - name: Delete the pull request images
         env:
           PR: ${{ github.event.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for image in amiga-fsuae-pr amiga-fsuae-aros-pr; do
-            gh api --paginate "/users/pulchart/packages/container/$image/versions" \
-              --jq ".[] | select(.metadata.container.tags == [\"pr-$PR\"] or .metadata.container.tags == []) | .id" |
-              while read -r id; do
-                gh api -X DELETE "/users/pulchart/packages/container/$image/versions/$id"
-              done
+            api="/users/pulchart/packages/container/$image"
+            versions=$(gh api --paginate "$api/versions" --jq '.[] | "\(.id) \(.metadata.container.tags | join(","))"') ||
+              { echo "$image: no package"; continue; }
+            # GHCR keeps the last tagged version: a package with only these images goes whole
+            if ! grep -v -e " pr-$PR\$" -e " \$" <<<"$versions" | grep -q .; then
+              gh api -X DELETE "$api"
+              continue
+            fi
+            grep -e " pr-$PR\$" -e " \$" <<<"$versions" | while read -r id _; do
+              gh api -X DELETE "$api/versions/$id"
+            done
           done
