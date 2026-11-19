@@ -1,0 +1,40 @@
+name: Copy to Docker Hub
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  copy:
+    if: github.triggering_actor == github.repository_owner && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    environment: dockerhub
+    steps:
+      - name: Copy the release tags from GHCR to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"
+          skopeo login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin <<<"$DOCKERHUB_TOKEN"
+          cat >sync.yml <<'EOF'
+          ghcr.io:
+            images-by-tag-regex:
+              pulchart/amiga-fsuae: ^(latest|[0-9].*)$
+              pulchart/amiga-fsuae-aros: ^(latest|[0-9].*)$
+          EOF
+          skopeo sync --all --preserve-digests --src yaml --dest docker sync.yml docker.io/pulchart
+          # skopeo sync skips a repository it cannot list and still exits 0
+          for image in amiga-fsuae amiga-fsuae-aros; do
+            test "$(skopeo inspect --format '{{.Digest}}' "docker://ghcr.io/pulchart/$image:latest")" = \
+                 "$(skopeo inspect --format '{{.Digest}}' "docker://docker.io/pulchart/$image:latest")"
+          done
+          skopeo logout --all
