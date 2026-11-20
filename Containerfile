@@ -1,6 +1,7 @@
 # Images that run Amiga software headless in FS-UAE.
 #   base: amiga-fsuae, FS-UAE, Xvfb, X tools, amitools and disk tools on Fedora
-#   aros: amiga-fsuae-aros, base and an AROS m68k nightly in /opt/aros
+#   aros: amiga-fsuae-aros, base and an AROS m68k nightly in /opt/aros,
+#   booted with the ROM in rom/ until the nightly has its ata.device fix
 #   test: boots AROS from aros, answers a requester with xdotool, takes a
 #   screenshot with Pillow
 # FS-UAE and amitools follow their newest releases for that Fedora, Renovate
@@ -76,13 +77,25 @@ ARG AROS_DATE
 
 COPY --from=aros-files /opt/aros /opt/aros
 
+# The nightly ata.device fails PIO writes at times with error 45. Until a
+# nightly has the fix (aros-development-team/AROS#2350), the ROM in rom/ is
+# built from pulchart/AROS 2b2d724966, that fix on AROS master 7539b08c14.
+# A checkout without Git LFS has pointer files there, which fail the check.
+COPY rom/aros-amiga-m68k-rom.bin rom/aros-amiga-m68k-ext.bin /opt/aros-rom/
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN printf '%s\n' \
+        '7566b66ce1abe41b8cf2b0ce557adbf797ff7c2b4379d50985e7e527eb073006  /opt/aros-rom/aros-amiga-m68k-rom.bin' \
+        '05afce22eedc95b75e4270569d658ecfafd9150b90bbc906bd59ca7f79da1454  /opt/aros-rom/aros-amiga-m68k-ext.bin' \
+    | sha256sum -c --quiet
+
 ENV AMIGA_SYSTEM=/opt/aros \
-    AMIGA_KICKSTART=/opt/aros/boot/amiga/aros-rom.bin \
-    AMIGA_KICKSTART_EXT=/opt/aros/boot/amiga/aros-ext.bin
+    AMIGA_KICKSTART=/opt/aros-rom/aros-amiga-m68k-rom.bin \
+    AMIGA_KICKSTART_EXT=/opt/aros-rom/aros-amiga-m68k-ext.bin
 
 LABEL org.opencontainers.image.title="amiga-fsuae-aros" \
       org.opencontainers.image.description="FS-UAE, Xvfb, amitools and AROS m68k for headless Amiga tests" \
-      aros.version="${AROS_DATE}"
+      aros.version="${AROS_DATE}" \
+      aros.rom="pulchart/AROS 2b2d724966, aros-development-team/AROS#2350"
 
 
 # AROS reports Kickstart 51, AmigaOS 3.x up to 47

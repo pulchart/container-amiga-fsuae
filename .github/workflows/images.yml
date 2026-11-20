@@ -29,6 +29,7 @@ env:
   IMAGE_FILES: |
     images:
       - Containerfile
+      - rom/**
       - .github/workflows/images.yml
 
 jobs:
@@ -43,6 +44,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          lfs: true
       - name: Check whether the pull request changes the images
         if: github.event_name == 'pull_request'
         id: changes
