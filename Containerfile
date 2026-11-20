@@ -52,9 +52,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # hadolint ignore=DL3041
 RUN dnf install -y bsdtar \
     && dnf clean all \
-    && { curl -fsSL --retry 3 -o /tmp/aros.zip "${AROS_URL}" \
+    && { curl -fsSL --retry 3 --retry-all-errors -o /tmp/aros.zip "${AROS_URL}" \
          || { echo "AROS nightly ${AROS_DATE} has no amiga-m68k boot ISO" >&2; exit 1; }; } \
-    && curl -fsSL --retry 3 -o /tmp/aros.zip.md5 "${AROS_URL}.md5" \
+    && curl -fsSL --retry 3 --retry-all-errors -o /tmp/aros.zip.md5 "${AROS_URL}.md5" \
     && echo "$(cut -d' ' -f1 /tmp/aros.zip.md5)  /tmp/aros.zip" | md5sum -c - \
     && mkdir -p /tmp/aros /opt/aros \
     && bsdtar -xf /tmp/aros.zip -C /tmp/aros \
