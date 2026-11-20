@@ -11,7 +11,7 @@ On GHCR and Docker Hub, same tags and digests.
 | `pulchart/amiga-fsuae` | `<fsuae version>`, e.g. `3.2.35` | Fedora, FS-UAE, Xvfb, xauth, xdotool, amitools, PyYAML, Pillow, mtools, dosfstools, exfatprogs, lhasa |
 | | `<fsuae version>-<build date>`, e.g. `3.2.35-20261119` | one build |
 | | `latest` | newest build |
-| `pulchart/amiga-fsuae-aros` | `<AROS nightly date>`, e.g. `20261118` | `amiga-fsuae` and AROS m68k in `/opt/aros` |
+| `pulchart/amiga-fsuae-aros` | `<AROS nightly date>`, e.g. `20261118` | `amiga-fsuae` and AROS m68k in `/opt/aros`, ROM in `/opt/aros-rom` |
 | | `<AROS nightly date>-<build date>`, e.g. `20261118-20261119` | one build |
 | | `latest` | newest build |
 
@@ -77,6 +77,10 @@ Check where an image was built:
 ```sh
 gh attestation verify oci://ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119 -R pulchart/container-amiga-fsuae
 ```
+
+## Temporary AROS ROM
+
+The AROS nightly ata.device fails PIO writes at times with error 45, which stops a test on a file system requester. Until a nightly has the fix, [aros-development-team/AROS#2350](https://github.com/aros-development-team/AROS/pull/2350), `amiga-fsuae-aros` boots the ROM in `rom/`, built for amiga-m68k from [pulchart/AROS](https://github.com/pulchart/AROS/tree/wip/jpu/ata-pio-write) 2b2d724966, which is that fix on AROS master 7539b08c14. The label `aros.rom` names it. The ROM is in Git LFS, so a clone needs `git lfs`, and the build checks its SHA-256.
 
 ## Licenses
 
