@@ -1,22 +1,10 @@
-# Images that run Amiga software headless in FS-UAE.
-#   base: amiga-fsuae, FS-UAE, Xvfb, X tools, amitools and disk tools on Fedora
-#   aros: amiga-fsuae-aros, base and an AROS m68k nightly in /opt/aros,
-#   booted with the ROM in rom/ until the nightly has its ata.device fix
-#   test: boots AROS from aros, answers a requester with xdotool, takes a
-#   screenshot with Pillow
-#   amigaos-3.2.3, amigaos-3.1: amiga-fsuae-amigaos, base and an installed
-#   AmigaOS in /opt/amigaos<version>, built locally from own install media
-#   and never published
-#   amigaos-test: test for the AmigaOS of AMIGAOS_VERSION, with an RDB disk
-# FS-UAE and amitools follow their newest releases for that Fedora, Renovate
-# moves FEDORA_VERSION and AROS_DATE.
+# Images that run Amiga software headless in FS-UAE, see README.md
 
 # renovate: datasource=endoflife-date depName=fedora
 ARG FEDORA_VERSION=45
 # renovate: datasource=custom.aros-nightly depName=aros-nightly
 ARG AROS_DATE=20261118
-# where /opt/aros comes from: aros-fetch, or a released amiga-fsuae-aros of
-# the same AROS_DATE and aros-fetch and aros stages
+# aros-fetch, or a released amiga-fsuae-aros with the same aros stages
 ARG AROS_SOURCE=aros-fetch
 # AmigaOS that amigaos-test boots: 3.2.3 or 3.1
 ARG AMIGAOS_VERSION=3.2.3
@@ -49,8 +37,6 @@ LABEL org.opencontainers.image.title="amiga-fsuae" \
       org.opencontainers.image.licenses="NOASSERTION"
 
 
-# Download AROS, check it against the MD5 SourceForge publishes and unpack
-# it; only /opt/aros goes into the aros image.
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS aros-fetch
 
 ARG AROS_DATE
@@ -58,7 +44,6 @@ ARG AROS_URL=https://downloads.sourceforge.net/project/aros/nightly2/${AROS_DATE
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# AROS's own PFS3 handler goes, so a handler under test is the only PFS3
 # hadolint ignore=DL3041
 RUN dnf install -y bsdtar \
     && dnf clean all \
@@ -83,10 +68,7 @@ ARG AROS_DATE
 
 COPY --from=aros-files /opt/aros /opt/aros
 
-# The nightly ata.device fails PIO writes at times with error 45. Until a
-# nightly has the fix (aros-development-team/AROS#2350), the ROM in rom/ is
-# built from pulchart/AROS 2b2d724966, that fix on AROS master 7539b08c14.
-# A checkout without Git LFS has pointer files there, which fail the check.
+# ROM with the ata.device fix of AROS#2350 until a nightly has it, see README.md
 COPY rom/aros-amiga-m68k-rom.bin rom/aros-amiga-m68k-ext.bin /opt/aros-rom/
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN printf '%s\n' \
@@ -104,10 +86,8 @@ LABEL org.opencontainers.image.title="amiga-fsuae-aros" \
       aros.rom="pulchart/AROS 2b2d724966, aros-development-team/AROS#2350"
 
 
-# AROS reports Kickstart 51, AmigaOS 3.x up to 47
 FROM aros AS test
 
-# run.sh expands its own variables
 # hadolint ignore=SC2016
 RUN w=$(mktemp -d) \
     && mkdir -p "$w/out" "$w/base" \
@@ -131,18 +111,12 @@ RUN w=$(mktemp -d) \
     && { [ -s "$w/screen.png" ] || { echo "Pillow took no screenshot" >&2; exit 1; }; }
 
 
-# AmigaOS is not free: its stages take the install media from a build context
-# that holds AmigaOS3.2/adf, Update3.2.3 and AmigaOS3.1, e.g.
-#   podman build --build-context amigaos=/opt/AmigaOS --target amigaos-3.2.3 .
+# AmigaOS stages take the install media from build context amigaos, see README.md
 
-# AmigaOS 3.2 from its ADFs as its Installer puts it on a hard drive of a
-# machine with a 3.2.3 ROM, which needs no Kickstart modules, then Update
-# 3.2.3. The result has to match the MD5 list of the update's InstallCheck.
 FROM base AS amigaos-3.2.3-install
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# amigaos is the build context
 # hadolint ignore=DL3022
 COPY --from=amigaos AmigaOS3.2/adf /tmp/adf
 # hadolint ignore=DL3022
@@ -190,13 +164,11 @@ RUN s=/opt/amigaos3.2.3 \
     && { [ -z "$(find "$s" -iname 'pfs3*')" ] || { echo "AmigaOS has a PFS3 handler" >&2; exit 1; }; }
 
 
-# AmigaOS 3.1: its Workbench disk without L/PPaint, a bundle drawer with a
-# damaged file, and 68040.library from its Install disk
+# Workbench 3.1 without L/PPaint, which is damaged on the disk
 FROM base AS amigaos-3.1-install
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# amigaos is the build context
 # hadolint ignore=DL3022
 COPY --from=amigaos AmigaOS3.1 /tmp/amigaos
 
@@ -239,15 +211,11 @@ LABEL org.opencontainers.image.title="amiga-fsuae-amigaos" \
       amigaos.version="3.1"
 
 
-# As test, with the memory and the RDB disk on ide0 of the pfs3aio tests,
-# which it formats and fills. AmigaOS 3.1 reports Kickstart 40, 3.2.x 47.
-# a stage of this file, not an image
 # hadolint ignore=DL3006
 FROM amigaos-${AMIGAOS_VERSION} AS amigaos-test
 
 ARG AMIGAOS_VERSION
 
-# run.sh expands its own variables
 # hadolint ignore=SC2016
 RUN w=$(mktemp -d) \
     && case "$AMIGAOS_VERSION" in 3.1) k=40 ;; *) k=47 ;; esac \
