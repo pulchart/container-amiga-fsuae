@@ -82,6 +82,18 @@ gh attestation verify oci://ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119 
 
 The AROS nightly ata.device fails PIO writes at times with error 45, which stops a test on a file system requester. Until a nightly has the fix, [aros-development-team/AROS#2350](https://github.com/aros-development-team/AROS/pull/2350), `amiga-fsuae-aros` boots the ROM in `rom/`, built for amiga-m68k from [pulchart/AROS](https://github.com/pulchart/AROS/tree/wip/jpu/ata-pio-write) 2b2d724966, which is that fix on AROS master 7539b08c14. The label `aros.rom` names it. The ROM is in Git LFS, so a clone needs `git lfs`, and the build checks its SHA-256.
 
+## AmigaOS, local only
+
+AmigaOS is not free, so `amiga-fsuae-amigaos` is built locally from own install media and never pushed. The `amigaos` build context holds `AmigaOS3.2/adf`, `Update3.2.3` and `AmigaOS3.1`:
+
+```sh
+podman build --build-context amigaos=/opt/AmigaOS --target amigaos-3.2.3 -t localhost/amiga-fsuae-amigaos:3.2.3 .
+podman build --build-context amigaos=/opt/AmigaOS --target amigaos-3.1 -t localhost/amiga-fsuae-amigaos:3.1 .
+podman build --build-context amigaos=/opt/AmigaOS --target amigaos-test --build-arg AMIGAOS_VERSION=3.1 .
+```
+
+`amigaos-3.2.3` installs 3.2 from its ADFs as its Installer does with the 3.2.3 ROM, then Update 3.2.3, and checks the result against the MD5 list of the update's InstallCheck. `amigaos-3.1` is the Workbench 3.1 disk without its damaged `L/PPaint` drawer, plus `68040.library`. `amigaos-test` boots one with an RDB disk on ide0 and formats and fills that disk.
+
 ## Licenses
 
 The build recipes are MPL-2.0 (`LICENSE`). The software in the images keeps its own license.
