@@ -68,7 +68,7 @@ podman build --target test .    # boots AROS, answers a requester, takes a scree
 | | pull request from this repository merged into `master` | copies the tested `pr-<number>` images to the release tags, same digests, keeps 10 versions |
 | | pull request closed | deletes its `pr-<number>` images |
 | | manual on `master` | builds and publishes the release tags directly, e.g. for a newer FS-UAE without a pull request |
-| `Copy to Docker Hub` | manual, owner, `master` | copies `latest` and the version tags with `skopeo sync`; the only user of the Docker Hub token |
+| `Copy to Docker Hub` | manual, owner, `master` | copies `latest` and the version tags with `skopeo sync`, lists each tag as copied, unchanged or differs in the job summary and fails on differs; the only user of the Docker Hub token |
 
 The release images are the ones the pull request tested, so a pull request must be up to date with `master` before it merges.
 
