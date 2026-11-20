@@ -25,6 +25,11 @@ env:
   OWN_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
   # a manual run on master, which publishes its own build
   RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+  # dorny/paths-filter: the files whose change makes a pull request build images
+  IMAGE_FILES: |
+    images:
+      - Containerfile
+      - .github/workflows/images.yml
 
 jobs:
   images:
@@ -32,21 +37,34 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: read
       packages: write
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@v7
+      - name: Check whether the pull request changes the images
+        if: github.event_name == 'pull_request'
+        id: changes
+        uses: dorny/paths-filter@v4
+        with:
+          filters: ${{ env.IMAGE_FILES }}
+      - name: Report a pull request without image changes
+        if: github.event_name == 'pull_request' && steps.changes.outputs.images != 'true'
+        run: echo "No change to the Containerfile or this workflow, no images built" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: hadolint
         run: podman run --rm -i "$HADOLINT" hadolint - <Containerfile
       - name: actionlint
         run: podman run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT" -color
       - name: Build and boot AROS
+        if: github.event_name != 'pull_request' || steps.changes.outputs.images == 'true'
+        id: build
         run: |
           podman build --target base -t amiga-fsuae .
           podman build --target aros -t amiga-fsuae-aros .
           podman build --target test .
       - name: Read the versions in the images
+        if: steps.build.outcome == 'success'
         id: v
         run: |
           {
@@ -57,6 +75,7 @@ jobs:
             echo "date=$(date -u +%Y%m%d)"
           } | tee -a "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"
       - name: Label the images
+        if: steps.build.outcome == 'success'
         env:
           FEDORA: ${{ steps.v.outputs.fedora }}
           FSUAE: ${{ steps.v.outputs.fsuae }}
@@ -71,7 +90,7 @@ jobs:
           podman build --target base "${labels[@]}" --label "org.opencontainers.image.version=$FSUAE" -t amiga-fsuae .
           podman build --target aros "${labels[@]}" --label "org.opencontainers.image.version=$AROS" -t amiga-fsuae-aros .
       - name: Push to GHCR
-        if: env.OWN_PR == 'true' || env.RELEASE == 'true'
+        if: steps.build.outcome == 'success' && (env.OWN_PR == 'true' || env.RELEASE == 'true')
         id: push
         env:
           PR: ${{ github.event.number }}
@@ -111,24 +130,32 @@ jobs:
           subject-name: ghcr.io/pulchart/amiga-fsuae-aros
           subject-digest: ${{ steps.push.outputs.aros }}
       - name: Keep the newest 10 tagged versions of each image
-        if: env.RELEASE == 'true'
+        if: steps.push.outcome == 'success' && env.RELEASE == 'true'
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
           packages: amiga-fsuae,amiga-fsuae-aros
           keep-n-tagged: 10
           delete-untagged: true
 
-  # merged into master: the tested pull request images get the release tags;
+  # merged into master after an image change: the tested pull request images get the release tags;
   # closed either way: the pr-<number> and untagged versions of the -pr
   # packages go
   closed:
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
+      pull-requests: read
       packages: write
     steps:
-      - name: Copy the pull request images to the release tags
+      - name: Check whether the pull request changed the images
         if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
+        id: changes
+        uses: dorny/paths-filter@v4
+        with:
+          filters: ${{ env.IMAGE_FILES }}
+      - name: Copy the pull request images to the release tags
+        if: steps.changes.outputs.images == 'true'
+        id: copy
         env:
           PR: ${{ github.event.number }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -150,14 +177,16 @@ jobs:
             done
           done
           skopeo logout ghcr.io
+          echo "copied=true" >>"$GITHUB_OUTPUT"
       - name: Keep the newest 10 tagged versions of each image
-        if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
+        if: steps.copy.outputs.copied == 'true'
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
           packages: amiga-fsuae,amiga-fsuae-aros
           keep-n-tagged: 10
           delete-untagged: true
       - name: Delete the pull request images
+        if: always()
         env:
           PR: ${{ github.event.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -171,7 +200,7 @@ jobs:
               gh api -X DELETE "$api"
               continue
             fi
-            grep -e " pr-$PR\$" -e " \$" <<<"$versions" | while read -r id _; do
+            { grep -e " pr-$PR\$" -e " \$" <<<"$versions" || true; } | while read -r id _; do
               gh api -X DELETE "$api/versions/$id"
             done
           done
