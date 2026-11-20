@@ -1,7 +1,8 @@
 # Images that run Amiga software headless in FS-UAE.
-#   base: amiga-fsuae, FS-UAE, Xvfb, amitools and disk tools on Fedora
+#   base: amiga-fsuae, FS-UAE, Xvfb, X tools, amitools and disk tools on Fedora
 #   aros: amiga-fsuae-aros, base and an AROS m68k nightly in /opt/aros
-#   test: boots AROS from aros and checks that it ran its Startup-Sequence
+#   test: boots AROS from aros, answers a requester with xdotool, takes a
+#   screenshot with Pillow
 # FS-UAE and amitools follow their newest releases for that Fedora, Renovate
 # moves FEDORA_VERSION and AROS_DATE.
 
@@ -19,8 +20,8 @@ RUN dnf install -y \
         "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
     && dnf install -y \
         fs-uae \
-        xorg-x11-server-Xvfb xauth \
-        python3 python3-pip python3-pyyaml \
+        xorg-x11-server-Xvfb xauth xdotool \
+        python3 python3-pip python3-pyyaml python3-pillow \
         mtools dosfstools exfatprogs lhasa \
         procps-ng findutils \
     && pip install --no-cache-dir --root-user-action=ignore amitools \
@@ -31,7 +32,7 @@ ENV SDL_VIDEODRIVER=x11 \
     SDL_AUDIODRIVER=dummy
 
 LABEL org.opencontainers.image.title="amiga-fsuae" \
-      org.opencontainers.image.description="FS-UAE, Xvfb, amitools and disk tools for headless Amiga tests" \
+      org.opencontainers.image.description="FS-UAE, Xvfb, X tools, amitools and disk tools for headless Amiga tests" \
       org.opencontainers.image.source="https://github.com/pulchart/container-amiga-fsuae" \
       org.opencontainers.image.url="https://github.com/pulchart/container-amiga-fsuae" \
       org.opencontainers.image.vendor="Jaroslav Pulchart" \
@@ -69,7 +70,9 @@ ARG AROS_DATE
 
 COPY --from=aros-fetch /opt/aros /opt/aros
 
-ENV AROS=/opt/aros
+ENV AMIGA_SYSTEM=/opt/aros \
+    AMIGA_KICKSTART=/opt/aros/boot/amiga/aros-rom.bin \
+    AMIGA_KICKSTART_EXT=/opt/aros/boot/amiga/aros-ext.bin
 
 LABEL org.opencontainers.image.title="amiga-fsuae-aros" \
       org.opencontainers.image.description="FS-UAE, Xvfb, amitools and AROS m68k for headless Amiga tests" \
@@ -79,19 +82,25 @@ LABEL org.opencontainers.image.title="amiga-fsuae-aros" \
 # AROS reports Kickstart 51, AmigaOS 3.x up to 47
 FROM aros AS test
 
+# run.sh expands its own variables
+# hadolint ignore=SC2016
 RUN w=$(mktemp -d) \
     && mkdir -p "$w/out" "$w/base" \
-    && printf '%s\n' 'Version >OUT:version.txt' 'Echo "DONE" >OUT:done' >"$AROS/S/Startup-Sequence" \
+    && printf '%s\n' 'Version >OUT:version.txt' \
+        'RequestChoice >OUT:choice.txt TITLE "Test" BODY "Answer" GADGETS "Yes|No"' 'Echo "DONE" >OUT:done' >"$AMIGA_SYSTEM/S/Startup-Sequence" \
     && printf '%s\n' "[fs-uae]" "amiga_model = A1200" "cpu = 68040-NOMMU" "fast_memory = 8192" \
-        "kickstart_file = $AROS/boot/amiga/aros-rom.bin" "kickstart_ext_file = $AROS/boot/amiga/aros-ext.bin" \
+        "kickstart_file = $AMIGA_KICKSTART" "kickstart_ext_file = $AMIGA_KICKSTART_EXT" \
         "hard_drive_0 = $w/out" "hard_drive_0_label = OUT" "hard_drive_0_priority = -128" \
-        "hard_drive_2 = $AROS" "hard_drive_2_label = Boot" "hard_drive_2_priority = 10" \
+        "hard_drive_2 = $AMIGA_SYSTEM" "hard_drive_2_label = Boot" "hard_drive_2_priority = 10" \
         "joystick_port_1 = none" "uae_cpu_speed = max" "base_dir = $w/base" >"$w/run.fs-uae" \
-    && { xvfb-run -a fs-uae "$w/run.fs-uae" >"$w/fsuae.log" 2>&1 & } \
-    && for _ in $(seq 120); do [ -e "$w/out/done" ] && break; sleep 1; done \
-    && { pkill -TERM -f "fs-uae $w/run.fs-uae" || true; } \
-    && if grep -q "Kickstart 51" "$w/out/version.txt" 2>/dev/null; then \
-           tr '\r' '\n' <"$w/out/version.txt"; \
-       else \
+    && printf '%s\n' 'fs-uae "$1/run.fs-uae" >"$1/fsuae.log" 2>&1 &' \
+        'for _ in $(seq 120); do [ -e "$1/out/done" ] && break; xdotool key super+v; sleep 1; done' \
+        'python3 -c "from PIL import ImageGrab; ImageGrab.grab(xdisplay=\"\").save(\"$1/screen.png\")"' \
+        'kill -TERM $!; wait $!' >"$w/run.sh" \
+    && xvfb-run -a sh "$w/run.sh" "$w" \
+    && if ! grep -q "Kickstart 51" "$w/out/version.txt" 2>/dev/null; then \
            echo "AROS did not boot or did not report Kickstart 51" >&2; cat "$w/fsuae.log" >&2; exit 1; \
-       fi
+       fi \
+    && tr '\r' '\n' <"$w/out/version.txt" \
+    && { grep -q 1 "$w/out/choice.txt" || { echo "xdotool did not answer the requester" >&2; exit 1; }; } \
+    && { [ -s "$w/screen.png" ] || { echo "Pillow took no screenshot" >&2; exit 1; }; }
