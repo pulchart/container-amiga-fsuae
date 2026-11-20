@@ -110,20 +110,13 @@ jobs:
         with:
           subject-name: ghcr.io/pulchart/amiga-fsuae-aros
           subject-digest: ${{ steps.push.outputs.aros }}
-      - name: Keep the newest 10 versions of amiga-fsuae
+      - name: Keep the newest 10 tagged versions of each image
         if: env.RELEASE == 'true'
-        uses: actions/delete-package-versions@v5
+        uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          package-name: amiga-fsuae
-          package-type: container
-          min-versions-to-keep: 10
-      - name: Keep the newest 10 versions of amiga-fsuae-aros
-        if: env.RELEASE == 'true'
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: amiga-fsuae-aros
-          package-type: container
-          min-versions-to-keep: 10
+          packages: amiga-fsuae,amiga-fsuae-aros
+          keep-n-tagged: 10
+          delete-untagged: true
 
   # merged into master: the tested pull request images get the release tags;
   # closed either way: the pr-<number> and untagged versions of the -pr
@@ -157,20 +150,13 @@ jobs:
             done
           done
           skopeo logout ghcr.io
-      - name: Keep the newest 10 versions of amiga-fsuae
+      - name: Keep the newest 10 tagged versions of each image
         if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
-        uses: actions/delete-package-versions@v5
+        uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          package-name: amiga-fsuae
-          package-type: container
-          min-versions-to-keep: 10
-      - name: Keep the newest 10 versions of amiga-fsuae-aros
-        if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: amiga-fsuae-aros
-          package-type: container
-          min-versions-to-keep: 10
+          packages: amiga-fsuae,amiga-fsuae-aros
+          keep-n-tagged: 10
+          delete-untagged: true
       - name: Delete the pull request images
         env:
           PR: ${{ github.event.number }}
