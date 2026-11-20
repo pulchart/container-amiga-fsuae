@@ -34,7 +34,7 @@ An OS image names its system directory in `AMIGA_SYSTEM` and its ROM in `AMIGA_K
 
 FS-UAE (RPM Fusion) and amitools (PyPI) take their newest release at every build. Tags and labels come from the versions found in the image.
 
-SourceForge drops nightlies after a few days, so a pull request with a new `AROS_DATE` has to build while its nightly is there. A nightly without an amiga-m68k build fails with "has no amiga-m68k boot ISO" until Renovate moves on. The build checks the archive against the MD5 SourceForge publishes.
+SourceForge drops nightlies after a few days, so a pull request with a new `AROS_DATE` has to build while its nightly is there. Later builds of the same `AROS_DATE` take `/opt/aros` from an earlier image of the pull request or from the released `amiga-fsuae-aros:<AROS_DATE>`, when its `aros.fetch` label matches the hash of the `aros-fetch` and `aros` stages, so they need neither SourceForge nor the nightly. Locally, `podman build --build-arg AROS_SOURCE=<image>` takes `/opt/aros` from that image without the label check. A nightly without an amiga-m68k build fails with "has no amiga-m68k boot ISO" until Renovate moves on. The build checks the archive against the MD5 SourceForge publishes.
 
 ## Use
 

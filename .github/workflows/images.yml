@@ -56,13 +56,48 @@ jobs:
         run: podman run --rm -i "$HADOLINT" hadolint - <Containerfile
       - name: actionlint
         run: podman run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT" -color
-      - name: Build and boot AROS
+      # SourceForge drops nightlies after a few days: an earlier image of this
+      # pull request or a release with the same AROS_DATE and the same aros-fetch
+      # and aros stages already holds /opt/aros
+      - name: Find the AROS source
         if: github.event_name != 'pull_request' || steps.changes.outputs.images == 'true'
+        id: aros
+        env:
+          PR: ${{ github.event.number }}
+        run: |
+          date=$(sed -n 's/^ARG AROS_DATE=//p' Containerfile)
+          stages=$(sed -n '/ AS aros-fetch$/,/ AS test$/p' Containerfile)
+          if [ -z "$date" ] || ! grep -q " AS aros$" <<<"$stages"; then
+            echo "Containerfile: no ARG AROS_DATE or no aros-fetch, aros and test stages in that order" >&2
+            exit 1
+          fi
+          fetch=$(sha256sum <<<"$stages" | cut -c1-12)
+          source=aros-fetch
+          candidates=("$REGISTRY/amiga-fsuae-aros:$date")
+          [ "$OWN_PR" = true ] && candidates=("$REGISTRY/amiga-fsuae-aros-pr:pr-$PR" "${candidates[@]}")
+          for image in "${candidates[@]}"; do
+            if ! found=$(skopeo inspect --format '{{index .Labels "aros.version"}}|{{index .Labels "aros.fetch"}}|{{.Digest}}' "docker://$image" 2>&1); then
+              echo "$image: ${found##*: }"
+              continue
+            fi
+            IFS='|' read -r version label digest <<<"$found"
+            if [ "$version" = "$date" ] && [ "$label" = "$fetch" ]; then
+              source="${image%:*}@$digest"
+              break
+            fi
+            echo "$image: AROS $version, aros.fetch '$label', needs $date and $fetch"
+          done
+          echo "AROS from $source"
+          { echo "fetch=$fetch"; echo "source=$source"; } >>"$GITHUB_OUTPUT"
+      - name: Build and boot AROS
+        if: steps.aros.outcome == 'success'
         id: build
+        env:
+          AROS_SOURCE: ${{ steps.aros.outputs.source }}
         run: |
           podman build --target base -t amiga-fsuae .
-          podman build --target aros -t amiga-fsuae-aros .
-          podman build --target test .
+          podman build --target aros --build-arg "AROS_SOURCE=$AROS_SOURCE" -t amiga-fsuae-aros .
+          podman build --target test --build-arg "AROS_SOURCE=$AROS_SOURCE" .
       - name: Read the versions in the images
         if: steps.build.outcome == 'success'
         id: v
@@ -83,12 +118,15 @@ jobs:
           AROS: ${{ steps.v.outputs.aros }}
           DATE: ${{ steps.v.outputs.date }}
           REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+          AROS_SOURCE: ${{ steps.aros.outputs.source }}
+          AROS_FETCH: ${{ steps.aros.outputs.fetch }}
         run: |
           labels=(--label "fedora.version=$FEDORA" --label "fsuae.version=$FSUAE"
                   --label "amitools.version=$AMITOOLS" --label "build.date=$DATE"
                   --label "org.opencontainers.image.revision=$REVISION")
           podman build --target base "${labels[@]}" --label "org.opencontainers.image.version=$FSUAE" -t amiga-fsuae .
-          podman build --target aros "${labels[@]}" --label "org.opencontainers.image.version=$AROS" -t amiga-fsuae-aros .
+          podman build --target aros "${labels[@]}" --build-arg "AROS_SOURCE=$AROS_SOURCE" \
+            --label "org.opencontainers.image.version=$AROS" --label "aros.fetch=$AROS_FETCH" -t amiga-fsuae-aros .
       - name: Push to GHCR
         if: steps.build.outcome == 'success' && (env.OWN_PR == 'true' || env.RELEASE == 'true')
         id: push
@@ -145,6 +183,7 @@ jobs:
           FSUAE: ${{ steps.v.outputs.fsuae }}
           AMITOOLS: ${{ steps.v.outputs.amitools }}
           AROS: ${{ steps.v.outputs.aros }}
+          AROS_SOURCE: ${{ steps.aros.outputs.source }}
           FSUAE_TAGS: ${{ steps.push.outputs.fsuae_tags }}
           AROS_TAGS: ${{ steps.push.outputs.aros_tags }}
           FSUAE_DIGEST: ${{ steps.push.outputs.fsuae }}
@@ -163,7 +202,7 @@ jobs:
             echo "| \`$1\` | ${tags% } | ${digest:+\`$digest\`} | $attested |"
           }
           {
-            echo "Fedora $FEDORA, FS-UAE $FSUAE, amitools $AMITOOLS and AROS $AROS, the test stage passed"
+            echo "Fedora $FEDORA, FS-UAE $FSUAE, amitools $AMITOOLS and AROS $AROS from \`$AROS_SOURCE\`, the test stage passed"
             echo
             echo "| image | pushed | digest | attested |"
             echo "|---|---|---|---|"

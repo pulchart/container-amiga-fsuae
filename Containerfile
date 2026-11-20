@@ -10,6 +10,9 @@
 ARG FEDORA_VERSION=45
 # renovate: datasource=custom.aros-nightly depName=aros-nightly
 ARG AROS_DATE=20261118
+# where /opt/aros comes from: aros-fetch, or a released amiga-fsuae-aros of
+# the same AROS_DATE and aros-fetch and aros stages
+ARG AROS_SOURCE=aros-fetch
 
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS base
 
@@ -64,11 +67,14 @@ RUN dnf install -y bsdtar \
     && chmod -R u+w /opt/aros
 
 
+FROM ${AROS_SOURCE} AS aros-files
+
+
 FROM base AS aros
 
 ARG AROS_DATE
 
-COPY --from=aros-fetch /opt/aros /opt/aros
+COPY --from=aros-files /opt/aros /opt/aros
 
 ENV AMIGA_SYSTEM=/opt/aros \
     AMIGA_KICKSTART=/opt/aros/boot/amiga/aros-rom.bin \
