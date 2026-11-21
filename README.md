@@ -11,35 +11,40 @@ On GHCR and Docker Hub, same tags and digests.
 | `pulchart/amiga-fsuae` | `<fsuae version>`, e.g. `3.2.35` | Fedora, FS-UAE, Xvfb, xauth, xdotool, amitools, PyYAML, Pillow, mtools, dosfstools, exfatprogs, lhasa |
 | | `<fsuae version>-<build date>`, e.g. `3.2.35-20261119` | one build |
 | | `latest` | newest build |
-| `pulchart/amiga-fsuae-aros` | `<AROS nightly date>`, e.g. `20261118` | `amiga-fsuae` and AROS m68k in `/opt/aros`, ROM in `/opt/aros-rom` |
-| | `<AROS nightly date>-<build date>`, e.g. `20261118-20261119` | one build |
+| `pulchart/amiga-fsuae-aros` | `<AROS commit date>`, e.g. `20261121` | `amiga-fsuae` and AROS m68k in `/opt/aros`, ROM in `/opt/aros-rom` |
+| | `<AROS commit date>-<build date>`, e.g. `20261121-20261121` | one build |
+| | `latest` | newest build |
+| `pulchart/amiga-fsuae-apolloos` | `<ApolloOS commit date>`, e.g. `20261010` | `amiga-fsuae` and ApolloOS for UAE in `/opt/apolloos`, ROM in `/opt/apolloos-rom` |
+| | `<ApolloOS commit date>-<build date>`, e.g. `20261010-20261121` | one build |
 | | `latest` | newest build |
 
 ```sh
-podman pull ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119
-podman pull docker.io/pulchart/amiga-fsuae-aros:20261118-20261119
+podman pull ghcr.io/pulchart/amiga-fsuae-aros:20261121-20261121
+podman pull docker.io/pulchart/amiga-fsuae-aros:20261121-20261121
 ```
 
-Pin CI to a tag with a build date. GHCR keeps the newest 10 versions of each image, Docker Hub keeps every copied tag. The labels `fedora.version`, `fsuae.version`, `amitools.version`, `aros.version`, `build.date` and `org.opencontainers.image.revision` show what an image holds:
+Pin CI to a tag with a build date. GHCR keeps the newest 10 versions of each image, Docker Hub keeps every copied tag. The labels `fedora.version`, `fsuae.version`, `amitools.version`, `build.date` and `org.opencontainers.image.revision` show what an image holds. An OS image adds `<os>.commit`, `<os>.prs`, `<os>.version` with the commit date and `<os>.build`:
 
 ```sh
 podman image inspect ghcr.io/pulchart/amiga-fsuae-aros:latest --format '{{json .Labels}}'
 ```
 
-An OS image names its system directory in `AMIGA_SYSTEM` and its ROM in `AMIGA_KICKSTART`, plus `AMIGA_KICKSTART_EXT` when the ROM has a second half, so a test needs no OS specific paths. `amiga-fsuae-aros` has no `L:pfs3-handler`, so a PFS3 handler under test is the only one.
+An OS image names its system directory in `AMIGA_SYSTEM` and its ROM in `AMIGA_KICKSTART`, plus `AMIGA_KICKSTART_EXT` when the ROM has a second half, so a test needs no OS specific paths. A test disk goes on the FS-UAE controller in `AMIGA_HD_CONTROLLER`, `ide0` when it is not set. ApolloOS finds IDE only on Apollo boards, so `amiga-fsuae-apolloos` sets `uae`. The OS images have no PFS3 handler, so a PFS3 handler under test is the only one.
 
 ## Versions
 
-`FEDORA_VERSION` and `AROS_DATE` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC, after SourceForge has the night's AROS build. Fedora releases come from endoflife.date, so no prerelease.
+`FEDORA_VERSION`, `AROS_COMMIT` and `APOLLOOS_COMMIT` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC. The commits follow `master` of AROS and ApolloOS. Fedora releases come from endoflife.date, so no prerelease.
 
 FS-UAE (RPM Fusion) and amitools (PyPI) take their newest release at every build. Tags and labels come from the versions found in the image.
 
-SourceForge drops nightlies after a few days, so a pull request with a new `AROS_DATE` has to build while its nightly is there. Later builds of the same `AROS_DATE` take `/opt/aros` from an earlier image of the pull request or from the released `amiga-fsuae-aros:<AROS_DATE>`, when its `aros.fetch` label matches the hash of the `aros-fetch` and `aros` stages, so they need neither SourceForge nor the nightly. Locally, `podman build --build-arg AROS_SOURCE=<image>` takes `/opt/aros` from that image without the label check. A nightly without an amiga-m68k build fails with "has no amiga-m68k boot ISO" until Renovate moves on. The build checks the archive against the MD5 SourceForge publishes.
+AROS and ApolloOS build from source at their commit, with the pull requests in `AROS_PRS` and `APOLLOOS_PRS` merged on top. Each pull request is pinned to a prefix of its head commit as `<number>:<head commit prefix>`, so a pull request that moved stops the build until its pin is updated. `os-source.sh` does the fetch and the merges.
+
+A build takes the OS from an earlier image of the pull request or from the released `latest` when its `<os>.build` label matches the hash of the build stages, the commit, the pull requests and `os-source.sh`, so an OS builds only when one of them changes. Locally, `podman build --build-arg AROS_SOURCE=<image>` or `APOLLOOS_SOURCE=<image>` takes the OS from that image without the label check.
 
 ## Use
 
 ```sh
-podman run --rm -v "$PWD:/work" -w /work ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119 \
+podman run --rm -v "$PWD:/work" -w /work ghcr.io/pulchart/amiga-fsuae-aros:20261121-20261121 \
     xvfb-run -a fs-uae run.fs-uae
 ```
 
@@ -47,7 +52,7 @@ podman run --rm -v "$PWD:/work" -w /work ghcr.io/pulchart/amiga-fsuae-aros:20261
 jobs:
   test:
     runs-on: ubuntu-24.04
-    container: ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119
+    container: ghcr.io/pulchart/amiga-fsuae-aros:20261121-20261121
 ```
 
 FS-UAE names directory drives after their slot (`hard_drive_0` is `DH0:`), so partitions on test disks need other names. Stop FS-UAE with SIGTERM and wait for it to exit, or its last disk writes are lost.
@@ -60,27 +65,27 @@ A requester stops a headless run until it is answered. `xdotool key super+v` sen
 podman build --target base -t amiga-fsuae .
 podman build --target aros -t amiga-fsuae-aros .
 podman build --target test .    # boots AROS, answers a requester, takes a screenshot
+podman build --target apolloos -t amiga-fsuae-apolloos .
+podman build --target apolloos-test .
 ```
 
 | workflow | when | does |
 |---|---|---|
-| `Images` | pull request | lint; when it changes the `Containerfile` or `images.yml` also build, `test` stage, labels, and a pull request from this repository pushes `amiga-fsuae-pr:pr-<number>` and `amiga-fsuae-aros-pr:pr-<number>` and attests them |
-| | pull request from this repository merged into `master` | copies the tested `pr-<number>` images to the release tags when it changed the `Containerfile` or `images.yml`, same digests, keeps 10 versions |
+| `Images` | pull request | lint; when it changes the `Containerfile`, `os-source.sh` or `images.yml`, job `base` builds `amiga-fsuae` and the `os` jobs build AROS and ApolloOS on it side by side, a fork on its own base, and run their test stages; a pull request from this repository pushes `amiga-fsuae-pr`, `amiga-fsuae-aros-pr` and `amiga-fsuae-apolloos-pr` as `pr-<number>` and attests them; job `images` is the required check |
+| | pull request from this repository merged into `master` | copies the tested `pr-<number>` images to the release tags when it changed the `Containerfile`, `os-source.sh` or `images.yml`, same digests, keeps 10 versions |
 | | pull request closed | deletes its `pr-<number>` images |
-| | manual on `master` | builds and publishes the release tags directly, e.g. for a newer FS-UAE without a pull request |
+| | manual on `master` | builds and tests as a pull request, pushes as `run-<id>`, copies those images to the release tags when all passed and deletes the `run-<id>` images, e.g. for a newer FS-UAE without a pull request |
 | `Copy to Docker Hub` | manual, owner, `master` | copies `latest` and the version tags with `skopeo sync`, lists each tag as copied, unchanged or differs in the job summary and fails on differs; the only user of the Docker Hub token |
+
+The AROS and ApolloOS images build on the `base` stage, or on the image in `BASE`, which CI sets to the `amiga-fsuae` of the run. `.github/scripts/publish.sh` copies tested images to the release tags and `.github/scripts/delete-pr-images.sh` deletes the tested images.
 
 The release images are the ones the pull request tested, so a pull request must be up to date with `master` before it merges.
 
 Check where an image was built:
 
 ```sh
-gh attestation verify oci://ghcr.io/pulchart/amiga-fsuae-aros:20261118-20261119 -R pulchart/container-amiga-fsuae
+gh attestation verify oci://ghcr.io/pulchart/amiga-fsuae-aros:20261121-20261121 -R pulchart/container-amiga-fsuae
 ```
-
-## Temporary AROS ROM
-
-The AROS nightly ata.device fails PIO writes at times with error 45, which stops a test on a file system requester. Until a nightly has the fix, [aros-development-team/AROS#2350](https://github.com/aros-development-team/AROS/pull/2350), `amiga-fsuae-aros` boots the ROM in `rom/`, built for amiga-m68k from [pulchart/AROS](https://github.com/pulchart/AROS/tree/wip/jpu/ata-pio-write) 2b2d724966, which is that fix on AROS master 7539b08c14. The label `aros.rom` names it. The ROM is in Git LFS, so a clone needs `git lfs`, and the build checks its SHA-256.
 
 ## AmigaOS, local only
 
@@ -101,6 +106,7 @@ The build recipes are MPL-2.0 (`LICENSE`). The software in the images keeps its 
 | component | license | source |
 |---|---|---|
 | FS-UAE | GPL-2.0-or-later | [fs-uae.net](https://fs-uae.net), RPM Fusion source package |
-| AROS | AROS Public License | [aros-development-team/AROS](https://github.com/aros-development-team/AROS), [SourceForge nightlies](https://sourceforge.net/projects/aros/files/nightly2/) |
+| AROS | AROS Public License | [aros-development-team/AROS](https://github.com/aros-development-team/AROS) at `aros.commit` with `aros.prs` |
+| ApolloOS | AROS Public License | [ApolloTeam-dev/ApolloOS](https://github.com/ApolloTeam-dev/ApolloOS) at `apolloos.commit` with `apolloos.prs` |
 | amitools | GPL-2.0-or-later | [cnvogelg/amitools](https://github.com/cnvogelg/amitools) |
 | Fedora packages | per package | Fedora source packages |

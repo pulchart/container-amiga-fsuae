@@ -25,7 +25,7 @@ jobs:
         run: |
           skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"
           skopeo login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin <<<"$DOCKERHUB_TOKEN"
-          images=(amiga-fsuae amiga-fsuae-aros)
+          images=(amiga-fsuae amiga-fsuae-aros amiga-fsuae-apolloos)
           tags='^(latest|[0-9].*)$'
           digest() { skopeo inspect --format '{{.Digest}}' "docker://$1" 2>/dev/null || true; }
           declare -A before

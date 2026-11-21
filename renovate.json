@@ -7,12 +7,13 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "FEDORA_VERSION and AROS_DATE in the Containerfile",
+      "description": "FEDORA_VERSION, AROS_COMMIT and APOLLOOS_COMMIT in the Containerfile",
       "managerFilePatterns": [
         "/^Containerfile$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nARG \\w+=(?<currentValue>\\S+)"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nARG \\w+=(?<currentValue>\\S+)",
+        "# renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)\\nARG \\w+=(?<currentDigest>[0-9a-f]{40})"
       ]
     },
     {
@@ -27,12 +28,6 @@
       "datasourceTemplate": "docker"
     }
   ],
-  "customDatasources": {
-    "aros-nightly": {
-      "defaultRegistryUrlTemplate": "https://sourceforge.net/projects/aros/files/nightly2/",
-      "format": "html"
-    }
-  },
   "packageRules": [
     {
       "description": "Fedora releases come from endoflife.date, the image tags also have prereleases",
@@ -45,11 +40,15 @@
       "enabled": false
     },
     {
+      "description": "The AROS and ApolloOS builds stay on Ubuntu 22.04",
       "matchDatasources": [
-        "custom.aros-nightly"
+        "docker"
       ],
-      "extractVersion": "/nightly2/(?<version>\\d{8})/$",
-      "versioning": "regex:^(?<major>\\d{8})$"
+      "matchPackageNames": [
+        "docker.io/library/ubuntu",
+        "ubuntu"
+      ],
+      "enabled": false
     }
   ],
   "schedule": [
