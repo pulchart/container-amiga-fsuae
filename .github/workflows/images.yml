@@ -25,15 +25,17 @@ env:
   OWN_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
   # a manual run on master, which publishes its own build
   RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+  # tag of the tested images in the -pr packages
+  TAG: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || format('run-{0}', github.run_id) }}
   # dorny/paths-filter: the files whose change makes a pull request build images
   IMAGE_FILES: |
     images:
       - Containerfile
-      - rom/**
+      - os-source.sh
       - .github/workflows/images.yml
 
 jobs:
-  images:
+  base:
     if: github.event.action != 'closed'
     runs-on: ubuntu-24.04
     permissions:
@@ -42,10 +44,11 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    outputs:
+      build: ${{ github.event_name != 'pull_request' || steps.changes.outputs.images == 'true' }}
+      ref: ${{ steps.push.outputs.ref }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          lfs: true
       - name: Check whether the pull request changes the images
         if: github.event_name == 'pull_request'
         id: changes
@@ -54,175 +57,180 @@ jobs:
           filters: ${{ env.IMAGE_FILES }}
       - name: Report a pull request without image changes
         if: github.event_name == 'pull_request' && steps.changes.outputs.images != 'true'
-        run: echo "No change to the Containerfile or this workflow, no images built" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: echo "No change to the image files, no images built" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: hadolint
         run: podman run --rm -i "$HADOLINT" hadolint - <Containerfile
       - name: actionlint
         run: podman run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT" -color
-      # SourceForge drops nightlies after a few days: an earlier image of this
-      # pull request or a release with the same AROS_DATE and the same aros-fetch
-      # and aros stages already holds /opt/aros
-      - name: Find the AROS source
+      - name: Build amiga-fsuae
         if: github.event_name != 'pull_request' || steps.changes.outputs.images == 'true'
-        id: aros
-        env:
-          PR: ${{ github.event.number }}
-        run: |
-          date=$(sed -n 's/^ARG AROS_DATE=//p' Containerfile)
-          stages=$(sed -n '/ AS aros-fetch$/,/ AS test$/p' Containerfile)
-          if [ -z "$date" ] || ! grep -q " AS aros$" <<<"$stages"; then
-            echo "Containerfile: no ARG AROS_DATE or no aros-fetch, aros and test stages in that order" >&2
-            exit 1
-          fi
-          fetch=$(sha256sum <<<"$stages" | cut -c1-12)
-          source=aros-fetch
-          candidates=("$REGISTRY/amiga-fsuae-aros:$date")
-          [ "$OWN_PR" = true ] && candidates=("$REGISTRY/amiga-fsuae-aros-pr:pr-$PR" "${candidates[@]}")
-          for image in "${candidates[@]}"; do
-            if ! found=$(skopeo inspect --format '{{index .Labels "aros.version"}}|{{index .Labels "aros.fetch"}}|{{.Digest}}' "docker://$image" 2>&1); then
-              echo "$image: ${found##*: }"
-              continue
-            fi
-            IFS='|' read -r version label digest <<<"$found"
-            if [ "$version" = "$date" ] && [ "$label" = "$fetch" ]; then
-              source="${image%:*}@$digest"
-              break
-            fi
-            echo "$image: AROS $version, aros.fetch '$label', needs $date and $fetch"
-          done
-          echo "AROS from $source"
-          { echo "fetch=$fetch"; echo "source=$source"; } >>"$GITHUB_OUTPUT"
-      - name: Build and boot AROS
-        if: steps.aros.outcome == 'success'
         id: build
         env:
-          AROS_SOURCE: ${{ steps.aros.outputs.source }}
+          REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           podman build --target base -t amiga-fsuae .
-          podman build --target aros --build-arg "AROS_SOURCE=$AROS_SOURCE" -t amiga-fsuae-aros .
-          podman build --target test --build-arg "AROS_SOURCE=$AROS_SOURCE" .
-      - name: Read the versions in the images
-        if: steps.build.outcome == 'success'
-        id: v
-        run: |
-          {
-            podman run --rm amiga-fsuae sh -c 'echo "fedora=$(rpm -E %fedora)"
-              echo "fsuae=$(rpm -q --qf "%{VERSION}" fs-uae)"
-              echo "amitools=$(python3 -c "import importlib.metadata as m; print(m.version(\"amitools\"))")"'
-            echo "aros=$(podman image inspect amiga-fsuae-aros --format '{{index .Labels "aros.version"}}')"
-            echo "date=$(date -u +%Y%m%d)"
-          } | tee -a "$GITHUB_OUTPUT"
-      - name: Label the images
-        if: steps.build.outcome == 'success'
-        env:
-          FEDORA: ${{ steps.v.outputs.fedora }}
-          FSUAE: ${{ steps.v.outputs.fsuae }}
-          AMITOOLS: ${{ steps.v.outputs.amitools }}
-          AROS: ${{ steps.v.outputs.aros }}
-          DATE: ${{ steps.v.outputs.date }}
-          REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-          AROS_SOURCE: ${{ steps.aros.outputs.source }}
-          AROS_FETCH: ${{ steps.aros.outputs.fetch }}
-        run: |
-          labels=(--label "fedora.version=$FEDORA" --label "fsuae.version=$FSUAE"
-                  --label "amitools.version=$AMITOOLS" --label "build.date=$DATE"
-                  --label "org.opencontainers.image.revision=$REVISION")
-          podman build --target base "${labels[@]}" --label "org.opencontainers.image.version=$FSUAE" -t amiga-fsuae .
-          podman build --target aros "${labels[@]}" --build-arg "AROS_SOURCE=$AROS_SOURCE" \
-            --label "org.opencontainers.image.version=$AROS" --label "aros.fetch=$AROS_FETCH" -t amiga-fsuae-aros .
-      - name: Push to GHCR
+          eval "$(podman run --rm amiga-fsuae sh -c 'echo "fedora=$(rpm -E %fedora)"
+            echo "fsuae=$(rpm -q --qf "%{VERSION}" fs-uae)"
+            echo "amitools=$(python3 -c "import importlib.metadata as m; print(m.version(\"amitools\"))")"')"
+          podman build --target base --label "fedora.version=$fedora" --label "fsuae.version=$fsuae" \
+            --label "amitools.version=$amitools" --label "build.date=$(date -u +%Y%m%d)" \
+            --label "org.opencontainers.image.revision=$REVISION" \
+            --label "org.opencontainers.image.version=$fsuae" -t amiga-fsuae .
+          echo "Fedora $fedora, FS-UAE $fsuae, amitools $amitools" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Push amiga-fsuae
         if: steps.build.outcome == 'success' && (env.OWN_PR == 'true' || env.RELEASE == 'true')
         id: push
         env:
-          PR: ${{ github.event.number }}
-          FSUAE: ${{ steps.v.outputs.fsuae }}
-          AROS: ${{ steps.v.outputs.aros }}
-          DATE: ${{ steps.v.outputs.date }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # a pull request pushes pr-<number> to the -pr packages, merging it copies them
-          if [ "$OWN_PR" = true ]; then
-            fsuae=("$REGISTRY/amiga-fsuae-pr:pr-$PR")
-            aros=("$REGISTRY/amiga-fsuae-aros-pr:pr-$PR")
-          else
-            fsuae=("$REGISTRY/amiga-fsuae:"{"$FSUAE","$FSUAE-$DATE",latest})
-            aros=("$REGISTRY/amiga-fsuae-aros:"{"$AROS","$AROS-$DATE",latest})
-          fi
           podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
-          for dest in "${fsuae[@]}"; do
-            podman push --digestfile fsuae.digest amiga-fsuae "$dest"
-          done
-          { echo "fsuae=$(cat fsuae.digest)"; echo "fsuae_tags=${fsuae[*]}"; } >>"$GITHUB_OUTPUT"
-          for dest in "${aros[@]}"; do
-            podman push --digestfile aros.digest amiga-fsuae-aros "$dest"
-          done
-          { echo "aros=$(cat aros.digest)"; echo "aros_tags=${aros[*]}"; } >>"$GITHUB_OUTPUT"
+          podman push --digestfile digest amiga-fsuae "$REGISTRY/amiga-fsuae-pr:$TAG"
           podman logout ghcr.io
+          { echo "digest=$(cat digest)"; echo "ref=$REGISTRY/amiga-fsuae-pr@$(cat digest)"; } >>"$GITHUB_OUTPUT"
       - name: Attest amiga-fsuae
         if: steps.push.outcome == 'success'
-        id: attest_fsuae
         uses: actions/attest@v4
         with:
           subject-name: ghcr.io/pulchart/amiga-fsuae
-          subject-digest: ${{ steps.push.outputs.fsuae }}
-      - name: Attest amiga-fsuae-aros
+          subject-digest: ${{ steps.push.outputs.digest }}
+
+  # each OS on the base of this run; a pull request from a fork builds its own base
+  os:
+    needs: base
+    if: needs.base.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: aros
+            test: test
+          - os: apolloos
+            test: apolloos-test
+    env:
+      OS: ${{ matrix.os }}
+      BASE: ${{ needs.base.outputs.ref || 'base' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to GHCR
+        if: env.OWN_PR == 'true' || env.RELEASE == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
+      # reuse the OS of an earlier image with the same <os>.build
+      - name: Find the ${{ matrix.os }} source
+        id: src
+        env:
+          PR: ${{ github.event.number }}
+        run: |
+          stage() { awk -v s="$1" '/^FROM /{p = ($NF == s)} p' Containerfile; }
+          build=$( { stage os-build; stage "$OS-build"; grep -E "^ARG ${OS^^}_(COMMIT|PRS)=" Containerfile; cat os-source.sh; } |
+                   sha256sum | cut -c1-12)
+          source=$OS-build
+          candidates=("$REGISTRY/amiga-fsuae-$OS:latest")
+          [ "$OWN_PR" = true ] && candidates=("$REGISTRY/amiga-fsuae-$OS-pr:pr-$PR" "${candidates[@]}")
+          for image in "${candidates[@]}"; do
+            if ! found=$(skopeo inspect --format "{{index .Labels \"$OS.build\"}}|{{.Digest}}" "docker://$image" 2>&1); then
+              echo "$image: ${found##*: }"
+              continue
+            fi
+            IFS='|' read -r label digest <<<"$found"
+            if [ "$label" = "$build" ]; then
+              source="${image%:*}@$digest"
+              break
+            fi
+            echo "$image: $OS.build '$label', needs $build"
+          done
+          echo "$OS from $source on $BASE"
+          { echo "build=$build"; echo "source=$source"; } >>"$GITHUB_OUTPUT"
+      - name: Build and boot ${{ matrix.os }}
+        env:
+          SOURCE: ${{ steps.src.outputs.source }}
+          BUILD: ${{ steps.src.outputs.build }}
+          TEST: ${{ matrix.test }}
+        run: |
+          args=(--build-arg "BASE=$BASE" --build-arg "${OS^^}_SOURCE=$SOURCE")
+          podman build --target "$OS" "${args[@]}" -t "amiga-fsuae-$OS" .
+          podman build --target "$TEST" "${args[@]}" .
+          version=$(podman run --rm "amiga-fsuae-$OS" sed -n 's/^date=//p' "/opt/$OS-rom/source")
+          [ -n "$version" ] || { echo "amiga-fsuae-$OS: no date in /opt/$OS-rom/source" >&2; exit 1; }
+          podman build --target "$OS" "${args[@]}" --label "org.opencontainers.image.version=$version" \
+            --label "$OS.version=$version" --label "$OS.build=$BUILD" -t "amiga-fsuae-$OS" .
+          echo "$OS $version from \`$SOURCE\`, the $TEST stage passed" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Push amiga-fsuae-${{ matrix.os }}
+        if: env.OWN_PR == 'true' || env.RELEASE == 'true'
+        id: push
+        run: |
+          podman push --digestfile digest "amiga-fsuae-$OS" "$REGISTRY/amiga-fsuae-$OS-pr:$TAG"
+          echo "digest=$(cat digest)" >>"$GITHUB_OUTPUT"
+      - name: Attest amiga-fsuae-${{ matrix.os }}
         if: steps.push.outcome == 'success'
-        id: attest_aros
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/pulchart/amiga-fsuae-aros
-          subject-digest: ${{ steps.push.outputs.aros }}
+          subject-name: ghcr.io/pulchart/amiga-fsuae-${{ matrix.os }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+
+  # the required check
+  images:
+    needs: [base, os]
+    if: always() && github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the image jobs
+        env:
+          BASE: ${{ needs.base.result }}
+          OS: ${{ needs.os.result }}
+        run: |
+          echo "base $BASE, os $OS"
+          [ "$BASE" = success ] && { [ "$OS" = success ] || [ "$OS" = skipped ]; }
+
+  # a manual run on master: the images it tested get the release tags
+  release:
+    needs: [base, os, images]
+    if: always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Copy the tested images to the release tags
+        if: needs.images.result == 'success'
+        id: copy
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
+          table=$(.github/scripts/publish.sh "$TAG" "$GITHUB_SHA")
+          skopeo logout ghcr.io
+          printf 'Published the images of run %s\n\n%s\n' "$GITHUB_RUN_ID" "$table" >>"$GITHUB_STEP_SUMMARY"
       - name: Keep the newest 10 tagged versions of each image
-        if: steps.push.outcome == 'success' && env.RELEASE == 'true'
+        if: steps.copy.outcome == 'success'
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          packages: amiga-fsuae,amiga-fsuae-aros
+          packages: amiga-fsuae,amiga-fsuae-aros,amiga-fsuae-apolloos
           keep-n-tagged: 10
           delete-untagged: true
-      - name: Summary
-        if: always() && steps.v.outcome == 'success'
+      - name: Delete the run images
+        if: always() && steps.copy.outcome != 'failure'
         env:
-          FEDORA: ${{ steps.v.outputs.fedora }}
-          FSUAE: ${{ steps.v.outputs.fsuae }}
-          AMITOOLS: ${{ steps.v.outputs.amitools }}
-          AROS: ${{ steps.v.outputs.aros }}
-          AROS_SOURCE: ${{ steps.aros.outputs.source }}
-          FSUAE_TAGS: ${{ steps.push.outputs.fsuae_tags }}
-          AROS_TAGS: ${{ steps.push.outputs.aros_tags }}
-          FSUAE_DIGEST: ${{ steps.push.outputs.fsuae }}
-          AROS_DIGEST: ${{ steps.push.outputs.aros }}
-          FSUAE_ATTESTED: ${{ steps.attest_fsuae.outcome }}
-          AROS_ATTESTED: ${{ steps.attest_aros.outcome }}
-        run: |
-          row() {
-            local tags=${2:-not pushed} digest=${3:+${3:7:12}} attested=no
-            [ "$4" = success ] && attested=yes
-            if [ -n "$2" ]; then
-              read -ra list <<<"$2"
-              tags=""
-              for t in "${list[@]}"; do tags+="\`$t\` "; done
-            fi
-            echo "| \`$1\` | ${tags% } | ${digest:+\`$digest\`} | $attested |"
-          }
-          {
-            echo "Fedora $FEDORA, FS-UAE $FSUAE, amitools $AMITOOLS and AROS $AROS from \`$AROS_SOURCE\`, the test stage passed"
-            echo
-            echo "| image | pushed | digest | attested |"
-            echo "|---|---|---|---|"
-            row amiga-fsuae "$FSUAE_TAGS" "$FSUAE_DIGEST" "$FSUAE_ATTESTED"
-            row amiga-fsuae-aros "$AROS_TAGS" "$AROS_DIGEST" "$AROS_ATTESTED"
-          } >>"$GITHUB_STEP_SUMMARY"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/delete-pr-images.sh "$TAG" >>"$GITHUB_STEP_SUMMARY"
 
-  # merged into master after an image change: the tested pull request images get the release tags;
-  # closed either way: the pr-<number> and untagged versions of the -pr
-  # packages go
   closed:
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       pull-requests: read
       packages: write
     steps:
+      - uses: actions/checkout@v7
       - name: Check whether the pull request changed the images
         if: github.event.pull_request.merged && github.event.pull_request.base.ref == 'master'
         id: changes
@@ -231,67 +239,28 @@ jobs:
           filters: ${{ env.IMAGE_FILES }}
       - name: Report a merge without image changes
         if: steps.changes.outputs.images == 'false'
-        run: echo "No change to the Containerfile or images.yml, nothing published" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: echo "No change to the image files, nothing published" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Copy the pull request images to the release tags
         if: steps.changes.outputs.images == 'true'
         id: copy
         env:
-          PR: ${{ github.event.number }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
-          rows=()
-          for image in amiga-fsuae amiga-fsuae-aros; do
-            src="docker://$REGISTRY/$image-pr:pr-$PR"
-            label() { skopeo inspect --format "{{index .Labels \"$1\"}}" "$src"; }
-            version=$(label org.opencontainers.image.version)
-            date=$(label build.date)
-            revision=$(label org.opencontainers.image.revision)
-            if [ -z "$version" ] || [ -z "$date" ] || [ "$revision" != "$HEAD" ]; then
-              echo "$src is not the tested build of $HEAD: version '$version', date '$date', revision '$revision'" >&2
-              exit 1
-            fi
-            for tag in "$version" "$version-$date" latest; do
-              skopeo copy --preserve-digests "$src" "docker://$REGISTRY/$image:$tag"
-            done
-            digest=$(skopeo inspect --format '{{.Digest}}' "$src")
-            rows+=("| \`$image\` | \`$version\` \`$version-$date\` \`latest\` | \`${digest:7:12}\` |")
-          done
+          table=$(.github/scripts/publish.sh "$TAG" "$HEAD")
           skopeo logout ghcr.io
-          {
-            echo "Published the images tested in pull request #$PR"
-            echo
-            echo "| image | tags | digest |"
-            echo "|---|---|---|"
-            printf '%s\n' "${rows[@]}"
-          } >>"$GITHUB_STEP_SUMMARY"
+          printf 'Published the images tested in pull request #%s\n\n%s\n' "${TAG#pr-}" "$table" >>"$GITHUB_STEP_SUMMARY"
           echo "copied=true" >>"$GITHUB_OUTPUT"
       - name: Keep the newest 10 tagged versions of each image
         if: steps.copy.outputs.copied == 'true'
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          packages: amiga-fsuae,amiga-fsuae-aros
+          packages: amiga-fsuae,amiga-fsuae-aros,amiga-fsuae-apolloos
           keep-n-tagged: 10
           delete-untagged: true
       - name: Delete the pull request images
-        if: always()
+        if: always() && steps.copy.outcome != 'failure'
         env:
-          PR: ${{ github.event.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for image in amiga-fsuae-pr amiga-fsuae-aros-pr; do
-            api="/users/pulchart/packages/container/$image"
-            versions=$(gh api --paginate "$api/versions" --jq '.[] | "\(.id) \(.metadata.container.tags | join(","))"') ||
-              { echo "$image: no package"; continue; }
-            # GHCR keeps the last tagged version: a package with only these images goes whole
-            if ! grep -v -e " pr-$PR\$" -e " \$" <<<"$versions" | grep -q .; then
-              gh api -X DELETE "$api"
-              echo "- deleted the package \`$image\`" >>"$GITHUB_STEP_SUMMARY"
-              continue
-            fi
-            { grep -e " pr-$PR\$" -e " \$" <<<"$versions" || true; } | while read -r id tags; do
-              gh api -X DELETE "$api/versions/$id"
-              echo "- deleted \`$image\` version $id ${tags:+\`$tags\`}" >>"$GITHUB_STEP_SUMMARY"
-            done
-          done
+        run: .github/scripts/delete-pr-images.sh "$TAG" >>"$GITHUB_STEP_SUMMARY"

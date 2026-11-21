@@ -2,12 +2,19 @@
 
 # renovate: datasource=endoflife-date depName=fedora
 ARG FEDORA_VERSION=45
-# renovate: datasource=custom.aros-nightly depName=aros-nightly
-ARG AROS_DATE=20261118
-# aros-fetch, or a released amiga-fsuae-aros with the same aros stages
-ARG AROS_SOURCE=aros-fetch
+# <OS>_PRS are merged on top of <OS>_COMMIT, <OS>_SOURCE holds the built OS
+# renovate: datasource=git-refs depName=https://github.com/aros-development-team/AROS currentValue=master
+ARG AROS_COMMIT=bba0a53b45e692027cceb02204c2cc759f091b0f
+ARG AROS_PRS="2340:6cc29d53a5f2 2350:2b2d724966fb 2363:f9dffb185b8c"
+ARG AROS_SOURCE=aros-build
+# renovate: datasource=git-refs depName=https://github.com/ApolloTeam-dev/ApolloOS currentValue=master
+ARG APOLLOOS_COMMIT=6230dc2a8692e422e11a5ec3776f365c97d5a75d
+ARG APOLLOOS_PRS="163:e8db6c9dd7df 164:6d51ee88bc83 165:cefa58fa65c7"
+ARG APOLLOOS_SOURCE=apolloos-build
 # AmigaOS that amigaos-test boots: 3.2.3 or 3.1
 ARG AMIGAOS_VERSION=3.2.3
+# the base stage, or an amiga-fsuae image to build the OS images on
+ARG BASE=base
 
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS base
 
@@ -37,44 +44,51 @@ LABEL org.opencontainers.image.title="amiga-fsuae" \
       org.opencontainers.image.licenses="NOASSERTION"
 
 
-FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS aros-fetch
+# host tools for the AROS and ApolloOS builds
+FROM docker.io/library/ubuntu:22.04 AS os-build
 
-ARG AROS_DATE
-ARG AROS_URL=https://downloads.sourceforge.net/project/aros/nightly2/${AROS_DATE}/Binaries/AROS-${AROS_DATE}-amiga-m68k-boot-iso.zip
+# hadolint ignore=DL3008,DL3015
+RUN apt-get update \
+    && apt-get install -y autoconf automake bison byacc bzip2 ca-certificates cmake curl file \
+       flex g++ gawk gcc gcc-multilib genisoimage git libc6-dev liblzo2-dev libpng-dev \
+       libsdl1.2-dev libx11-dev libxcursor-dev libxext-dev libxxf86vm-dev make netpbm \
+       python3 python3-mako python3-yaml unzip wget \
+    && rm -rf /var/lib/apt/lists/*
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY os-source.sh /usr/local/bin/os-source
 
-# hadolint ignore=DL3041
-RUN dnf install -y bsdtar \
-    && dnf clean all \
-    && { curl -fsSL --retry 3 --retry-all-errors -o /tmp/aros.zip "${AROS_URL}" \
-         || { echo "AROS nightly ${AROS_DATE} has no amiga-m68k boot ISO" >&2; exit 1; }; } \
-    && curl -fsSL --retry 3 --retry-all-errors -o /tmp/aros.zip.md5 "${AROS_URL}.md5" \
-    && echo "$(cut -d' ' -f1 /tmp/aros.zip.md5)  /tmp/aros.zip" | md5sum -c - \
-    && mkdir -p /tmp/aros /opt/aros \
-    && bsdtar -xf /tmp/aros.zip -C /tmp/aros \
-    && bsdtar -xf /tmp/aros/*/aros-amiga-m68k.iso -C /opt/aros \
-    && cp /tmp/aros/*/LICENSE /tmp/aros/*/ACKNOWLEDGEMENTS /opt/aros/ \
-    && rm /opt/aros/L/pfs3-handler \
-    && chmod -R u+w /opt/aros
+
+FROM os-build AS aros-build
+
+ARG AROS_REPO=https://github.com/aros-development-team/AROS.git
+ARG AROS_COMMIT
+ARG AROS_PRS
+
+WORKDIR /usr/src/aros
+RUN os-source "$AROS_REPO" "$AROS_COMMIT" "$AROS_PRS" /opt/aros-rom/source
+
+WORKDIR /usr/src/build
+RUN /usr/src/aros/configure --target=amiga-m68k --with-cpu=68040 \
+    && make -j"$(nproc)" \
+    && cp -a bin/amiga-m68k/AROS /opt/aros \
+    && rm -r /opt/aros/Developer \
+    && cp /usr/src/aros/LICENSE /usr/src/aros/ACKNOWLEDGEMENTS /opt/aros/ \
+    && find /opt/aros -iname 'pfs3*-handler' -delete \
+    && cp bin/amiga-m68k/gen/boot/aros-amiga-m68k-rom.bin bin/amiga-m68k/gen/boot/aros-amiga-m68k-ext.bin \
+       /opt/aros-rom/
 
 
 FROM ${AROS_SOURCE} AS aros-files
 
 
-FROM base AS aros
+# hadolint ignore=DL3006
+FROM ${BASE} AS aros
 
-ARG AROS_DATE
+ARG AROS_COMMIT
+ARG AROS_PRS
 
 COPY --from=aros-files /opt/aros /opt/aros
-
-# ROM with the ata.device fix of AROS#2350 until a nightly has it, see README.md
-COPY rom/aros-amiga-m68k-rom.bin rom/aros-amiga-m68k-ext.bin /opt/aros-rom/
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN printf '%s\n' \
-        '7566b66ce1abe41b8cf2b0ce557adbf797ff7c2b4379d50985e7e527eb073006  /opt/aros-rom/aros-amiga-m68k-rom.bin' \
-        '05afce22eedc95b75e4270569d658ecfafd9150b90bbc906bd59ca7f79da1454  /opt/aros-rom/aros-amiga-m68k-ext.bin' \
-    | sha256sum -c --quiet
+COPY --from=aros-files /opt/aros-rom /opt/aros-rom
 
 ENV AMIGA_SYSTEM=/opt/aros \
     AMIGA_KICKSTART=/opt/aros-rom/aros-amiga-m68k-rom.bin \
@@ -82,8 +96,8 @@ ENV AMIGA_SYSTEM=/opt/aros \
 
 LABEL org.opencontainers.image.title="amiga-fsuae-aros" \
       org.opencontainers.image.description="FS-UAE, Xvfb, amitools and AROS m68k for headless Amiga tests" \
-      aros.version="${AROS_DATE}" \
-      aros.rom="pulchart/AROS 2b2d724966, aros-development-team/AROS#2350"
+      aros.commit="${AROS_COMMIT}" \
+      aros.prs="${AROS_PRS}"
 
 
 FROM aros AS test
@@ -243,6 +257,84 @@ RUN w=$(mktemp -d) \
        fi \
     && tr '\r' '\n' <"$w/out/version.txt" \
     && cat "$w/out/cpu.txt" \
+    && { grep -qx Copy "$w/out/list.txt" && ! grep -qx List "$w/out/list.txt" \
+         || { echo "Format, MakeDir, Copy, Delete or List failed on the RDB disk" >&2; exit 1; }; } \
+    && { grep -q 1 "$w/out/choice.txt" || { echo "xdotool did not answer the requester" >&2; exit 1; }; } \
+    && { [ -s "$w/screen.png" ] || { echo "Pillow took no screenshot" >&2; exit 1; }; }
+
+
+# ApolloOS for UAE, configured as its BuildApolloOS_UAE workflow
+FROM os-build AS apolloos-build
+
+ARG APOLLOOS_REPO=https://github.com/ApolloTeam-dev/ApolloOS.git
+ARG APOLLOOS_COMMIT
+ARG APOLLOOS_PRS
+
+WORKDIR /usr/src/apolloos
+RUN os-source "$APOLLOOS_REPO" "$APOLLOOS_COMMIT" "$APOLLOOS_PRS" /opt/apolloos-rom/source \
+    && . ./make_dist_config.sh \
+    && ./configure "--enable-dist-name=${DISTRONAME}" "--enable-dist-version=${DISTROVERSION}" \
+       --target=amiga-m68k --with-optimization=-O2 --with-aros-prefs=classic \
+       --with-resolution=640x256x4 --with-cpu=68040 --disable-mmu --with-nonvampire-support \
+    && make -j"$(nproc)" compiler \
+    && make -j"$(nproc)" \
+    && cp -a bin/amiga-m68k/AROS /opt/apolloos \
+    && rm -r /opt/apolloos/Developer \
+    && cp LICENSE ACKNOWLEDGEMENTS /opt/apolloos/ \
+    && find /opt/apolloos -iname 'pfs3*-handler' -delete \
+    && cp bin/amiga-m68k/gen/boot/aros-amiga-m68k-rom.bin bin/amiga-m68k/gen/boot/aros-amiga-m68k-ext.bin \
+       /opt/apolloos-rom/
+
+
+FROM ${APOLLOOS_SOURCE} AS apolloos-files
+
+
+# hadolint ignore=DL3006
+FROM ${BASE} AS apolloos
+
+ARG APOLLOOS_COMMIT
+ARG APOLLOOS_PRS
+
+COPY --from=apolloos-files /opt/apolloos /opt/apolloos
+COPY --from=apolloos-files /opt/apolloos-rom /opt/apolloos-rom
+
+ENV AMIGA_SYSTEM=/opt/apolloos \
+    AMIGA_KICKSTART=/opt/apolloos-rom/aros-amiga-m68k-rom.bin \
+    AMIGA_KICKSTART_EXT=/opt/apolloos-rom/aros-amiga-m68k-ext.bin \
+    AMIGA_HD_CONTROLLER=uae
+
+LABEL org.opencontainers.image.title="amiga-fsuae-apolloos" \
+      org.opencontainers.image.description="FS-UAE, Xvfb, amitools and ApolloOS for headless Amiga tests" \
+      apolloos.commit="${APOLLOOS_COMMIT}" \
+      apolloos.prs="${APOLLOOS_PRS}"
+
+
+FROM apolloos AS apolloos-test
+
+# hadolint ignore=SC2016
+RUN w=$(mktemp -d) \
+    && mkdir -p "$w/out" "$w/base" \
+    && rdbtool "$w/disk.hdf" create size=16M + init + add size=100% name=TST0 dostype=DOS3 >/dev/null \
+    && printf '%s\n' 'FailAt 1000' 'Echo "" >RAM:enter' 'Version >OUT:version.txt' \
+        'SYS:System/Format DRIVE TST0: NAME Test QUICK NOICONS <RAM:enter >NIL:' \
+        'MakeDir TST0:c' 'Copy C: TST0:c QUIET' 'Delete TST0:c/List QUIET' 'Wait 1' \
+        'C:List TST0:c FILES LFORMAT "%n" >OUT:list.txt' \
+        'RequestChoice >OUT:choice.txt TITLE "Test" BODY "Answer" GADGETS "Yes|No"' 'Echo "DONE" >OUT:done' >"$AMIGA_SYSTEM/S/Startup-Sequence" \
+    && printf '%s\n' "[fs-uae]" "amiga_model = A1200" "cpu = 68040-NOMMU" "chip_memory = 2048" "fast_memory = 8192" \
+        "kickstart_file = $AMIGA_KICKSTART" "kickstart_ext_file = $AMIGA_KICKSTART_EXT" \
+        "hard_drive_0 = $w/out" "hard_drive_0_label = OUT" "hard_drive_0_priority = -128" \
+        "hard_drive_1 = $w/disk.hdf" "hard_drive_1_type = rdb" "hard_drive_1_controller = $AMIGA_HD_CONTROLLER" \
+        "hard_drive_2 = $AMIGA_SYSTEM" "hard_drive_2_label = Boot" "hard_drive_2_priority = 10" \
+        "joystick_port_1 = none" "uae_cpu_speed = max" "base_dir = $w/base" >"$w/run.fs-uae" \
+    && printf '%s\n' 'fs-uae "$1/run.fs-uae" >"$1/fsuae.log" 2>&1 &' \
+        'for _ in $(seq 120); do [ -e "$1/out/done" ] && break; xdotool key super+v; sleep 1; done' \
+        'python3 -c "from PIL import ImageGrab; ImageGrab.grab(xdisplay=\"\").save(\"$1/screen.png\")"' \
+        'kill -TERM $!; wait $!' >"$w/run.sh" \
+    && xvfb-run -a sh "$w/run.sh" "$w" \
+    && if ! grep -q "Kickstart 51\." "$w/out/version.txt" 2>/dev/null; then \
+           echo "ApolloOS did not boot or did not report Kickstart 51" >&2; cat "$w/fsuae.log" >&2; exit 1; \
+       fi \
+    && tr '\r' '\n' <"$w/out/version.txt" \
     && { grep -qx Copy "$w/out/list.txt" && ! grep -qx List "$w/out/list.txt" \
          || { echo "Format, MakeDir, Copy, Delete or List failed on the RDB disk" >&2; exit 1; }; } \
     && { grep -q 1 "$w/out/choice.txt" || { echo "xdotool did not answer the requester" >&2; exit 1; }; } \
