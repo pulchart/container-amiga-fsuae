@@ -4,8 +4,8 @@
 ARG FEDORA_VERSION=45
 # <OS>_PRS are merged on top of <OS>_COMMIT, <OS>_SOURCE holds the built OS
 # renovate: datasource=git-refs depName=https://github.com/aros-development-team/AROS currentValue=master
-ARG AROS_COMMIT=bba0a53b45e692027cceb02204c2cc759f091b0f
-ARG AROS_PRS="2340:6cc29d53a5f2 2350:2b2d724966fb 2363:f9dffb185b8c"
+ARG AROS_COMMIT=893693475df44f5ee847760ea31ea481f6aae8e4
+ARG AROS_PRS="2340:6cc29d53a5f2"
 ARG AROS_SOURCE=aros-build
 # renovate: datasource=git-refs depName=https://github.com/ApolloTeam-dev/ApolloOS currentValue=master
 ARG APOLLOOS_COMMIT=6230dc2a8692e422e11a5ec3776f365c97d5a75d
