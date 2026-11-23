@@ -7,7 +7,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "FEDORA_VERSION, AROS_COMMIT and APOLLOOS_COMMIT in the Containerfile",
+      "description": "FEDORA_VERSION, AROS_COMMIT, APOLLOOS_COMMIT and FSUAE_COMMIT in the Containerfile",
       "managerFilePatterns": [
         "/^Containerfile$/"
       ],
