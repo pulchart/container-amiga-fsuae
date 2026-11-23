@@ -33,9 +33,11 @@ An OS image names its system directory in `AMIGA_SYSTEM` and its ROM in `AMIGA_K
 
 ## Versions
 
-`FEDORA_VERSION`, `AROS_COMMIT` and `APOLLOOS_COMMIT` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC. The commits follow `master` of AROS and ApolloOS. Fedora releases come from endoflife.date, so no prerelease.
+`FEDORA_VERSION`, `AROS_COMMIT`, `APOLLOOS_COMMIT` and `FSUAE_COMMIT` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC. The commits follow `master` of AROS and ApolloOS and `wip/master/pcmcia-hotplug` of pulchart/fs-uae. Fedora releases come from endoflife.date, so no prerelease.
 
 FS-UAE (RPM Fusion) and amitools (PyPI) take their newest release at every build. Tags and labels come from the versions found in the image.
+
+The `fs-uae` program itself is built from [pulchart/fs-uae](https://github.com/pulchart/fs-uae) at `FSUAE_COMMIT`, the upstream `fs-uae-3` branch with uaelib function 120 ([FrodeSolheim/fs-uae#398](https://github.com/FrodeSolheim/fs-uae/pull/398)), which takes the PCMCIA card out of the slot and puts it back from the Amiga side, so a test can keep the slot empty. The images set `FSUAE_PCMCIA_HOTPLUG=1` and the label `fsuae.commit`. Locally, `podman build --build-context fs-uae-source=<dir>` builds `<dir>/src` instead of the commit.
 
 AROS and ApolloOS build from source at their commit, with the pull requests in `AROS_PRS` and `APOLLOOS_PRS` merged on top. Each pull request is pinned to a prefix of its head commit as `<number>:<head commit prefix>`, so a pull request that moved stops the build until its pin is updated. `os-source.sh` does the fetch and the merges.
 
@@ -105,7 +107,7 @@ The build recipes are MPL-2.0 (`LICENSE`). The software in the images keeps its 
 
 | component | license | source |
 |---|---|---|
-| FS-UAE | GPL-2.0-or-later | [fs-uae.net](https://fs-uae.net), RPM Fusion source package |
+| FS-UAE | GPL-2.0-or-later | [fs-uae.net](https://fs-uae.net), RPM Fusion source package; the program from [pulchart/fs-uae](https://github.com/pulchart/fs-uae) at `fsuae.commit` |
 | AROS | AROS Public License | [aros-development-team/AROS](https://github.com/aros-development-team/AROS) at `aros.commit` with `aros.prs` |
 | ApolloOS | AROS Public License | [ApolloTeam-dev/ApolloOS](https://github.com/ApolloTeam-dev/ApolloOS) at `apolloos.commit` with `apolloos.prs` |
 | amitools | GPL-2.0-or-later | [cnvogelg/amitools](https://github.com/cnvogelg/amitools) |

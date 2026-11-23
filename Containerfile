@@ -15,6 +15,44 @@ ARG APOLLOOS_SOURCE=apolloos-build
 ARG AMIGAOS_VERSION=3.2.3
 # the base stage, or an amiga-fsuae image to build the OS images on
 ARG BASE=base
+# FS-UAE from the upstream fs-uae-3 branch, plus uaelib function 120, which
+# takes the PCMCIA card out of the slot and puts it back
+ARG FSUAE_REPO=https://github.com/pulchart/fs-uae.git
+# renovate: datasource=git-refs depName=https://github.com/pulchart/fs-uae currentValue=wip/master/pcmcia-hotplug
+ARG FSUAE_COMMIT=baf0fb4b2eb9bd640078fcde1fa57eb4d11a036e
+
+# the FS-UAE source; podman build --build-context fs-uae-source=<dir> takes
+# <dir>/src instead
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS fs-uae-source
+
+ARG FSUAE_REPO
+ARG FSUAE_COMMIT
+# hadolint ignore=DL3041
+RUN dnf install -y git-core \
+    && dnf clean all \
+    && git clone -q "$FSUAE_REPO" /src \
+    && git -C /src checkout -q "$FSUAE_COMMIT"
+
+
+# FS-UAE built as RPM Fusion builds it, without JIT
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS fs-uae-build
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# hadolint ignore=DL3041
+RUN dnf install -y \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
+        dnf-plugins-core \
+    && dnf builddep -y --enablerepo=rpmfusion-free-source fs-uae \
+    && dnf install -y git-core autoconf automake libtool gettext-devel \
+    && dnf clean all
+
+COPY --from=fs-uae-source /src /src
+WORKDIR /src
+RUN ./bootstrap \
+    && CXXFLAGS="-O2" ./configure --disable-jit \
+    && make -j"$(nproc)" \
+    && strip fs-uae
 
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS base
 
@@ -33,8 +71,14 @@ RUN dnf install -y \
     && dnf clean all \
     && rm -rf /root/.cache
 
+# the RPM Fusion package brings the libraries and data files, the build the program
+COPY --from=fs-uae-build /src/fs-uae /usr/bin/fs-uae
+ARG FSUAE_COMMIT
+LABEL fsuae.commit="${FSUAE_COMMIT}"
+
 ENV SDL_VIDEODRIVER=x11 \
-    SDL_AUDIODRIVER=dummy
+    SDL_AUDIODRIVER=dummy \
+    FSUAE_PCMCIA_HOTPLUG=1
 
 LABEL org.opencontainers.image.title="amiga-fsuae" \
       org.opencontainers.image.description="FS-UAE, Xvfb, X tools, amitools and disk tools for headless Amiga tests" \
