@@ -215,7 +215,8 @@ RUN s=/opt/amigaos3.2.3 \
            t=$(sed 's|^[^/]*/||; s|^DEVS/|Devs/|; s|^LIBS/|Libs/|; s|^Classes/Datatypes/|Classes/DataTypes/|; s|\.Z$||' <<<"$f"); \
            mkdir -p "$(dirname "$s/$t")" && gzip -dc "$f" >"$s/$t" || exit 1; \
        done \
-    && cp /tmp/update/ROMs/A1200.47.115.rom "$s/Devs/Kickstarts/" \
+    && cp /tmp/update/ROMs/A1200.47.115.rom "$s/Devs/Kickstarts/A1200.rom" \
+    && cp /tmp/update/ROMs/CDTVA500A600A2000.47.115.rom "$s/Devs/Kickstarts/A600.rom" \
     && tr -d '\r' </tmp/update/InstallCheck/AOS_FILES_MD5 | sed "s|  SYS:|  $s/|" | md5sum -c --quiet \
     && d=$(find "$s" | tr '[:upper:]' '[:lower:]' | sort | uniq -d) \
     && { [ -z "$d" ] || { echo "names that differ in case only: $d" >&2; exit 1; }; } \
@@ -239,7 +240,8 @@ RUN mkdir L \
            xdftool /tmp/amigaos/ADFs/wbench31.adf read "$e" "$e"; \
        done \
     && xdftool /tmp/amigaos/ADFs/install31.adf read Libs/68040.library Libs/68040.library \
-    && mkdir Devs/Kickstarts && cp /tmp/amigaos/ROMs/kick40068.A1200 Devs/Kickstarts/ \
+    && mkdir Devs/Kickstarts && cp /tmp/amigaos/ROMs/kick40068.A1200 Devs/Kickstarts/A1200.rom \
+    && cp /tmp/amigaos/ROMs/kick40063.A600 Devs/Kickstarts/A600.rom \
     && d=$(find . | tr '[:upper:]' '[:lower:]' | sort | uniq -d) \
     && { [ -z "$d" ] || { echo "names that differ in case only: $d" >&2; exit 1; }; } \
     && { [ -z "$(find . -iname 'pfs3*')" ] || { echo "AmigaOS has a PFS3 handler" >&2; exit 1; }; }
@@ -250,7 +252,7 @@ FROM base AS amigaos-3.2.3
 COPY --from=amigaos-3.2.3-install /opt/amigaos3.2.3 /opt/amigaos3.2.3
 
 ENV AMIGA_SYSTEM=/opt/amigaos3.2.3 \
-    AMIGA_KICKSTART=/opt/amigaos3.2.3/Devs/Kickstarts/A1200.47.115.rom
+    AMIGA_KICKSTART=/opt/amigaos3.2.3/Devs/Kickstarts/A1200.rom
 
 LABEL org.opencontainers.image.title="amiga-fsuae-amigaos" \
       org.opencontainers.image.description="FS-UAE, Xvfb, amitools and AmigaOS 3.2.3 for headless Amiga tests, local only" \
@@ -262,7 +264,7 @@ FROM base AS amigaos-3.1
 COPY --from=amigaos-3.1-install /opt/amigaos3.1 /opt/amigaos3.1
 
 ENV AMIGA_SYSTEM=/opt/amigaos3.1 \
-    AMIGA_KICKSTART=/opt/amigaos3.1/Devs/Kickstarts/kick40068.A1200
+    AMIGA_KICKSTART=/opt/amigaos3.1/Devs/Kickstarts/A1200.rom
 
 LABEL org.opencontainers.image.title="amiga-fsuae-amigaos" \
       org.opencontainers.image.description="FS-UAE, Xvfb, amitools and AmigaOS 3.1 for headless Amiga tests, local only" \
