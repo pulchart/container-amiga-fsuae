@@ -33,11 +33,11 @@ An OS image names its system directory in `AMIGA_SYSTEM` and its ROM in `AMIGA_K
 
 ## Versions
 
-`FEDORA_VERSION`, `AROS_COMMIT`, `APOLLOOS_COMMIT` and `FSUAE_COMMIT` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC. The commits follow `master` of AROS and ApolloOS and `wip/master/pcmcia-hotplug` of pulchart/fs-uae. Fedora releases come from endoflife.date, so no prerelease.
+`FEDORA_VERSION`, `AROS_COMMIT`, `APOLLOOS_COMMIT` and `FSUAE_COMMIT` are pinned in the `Containerfile`. Renovate keeps one pull request with all updates and refreshes it daily between 4 and 8 UTC. The commits follow `master` of AROS and ApolloOS and `wip/jpu/next` of pulchart/fs-uae. Fedora releases come from endoflife.date, so no prerelease.
 
 FS-UAE (RPM Fusion) and amitools (PyPI) take their newest release at every build. Tags and labels come from the versions found in the image.
 
-The `fs-uae` program itself is built from [pulchart/fs-uae](https://github.com/pulchart/fs-uae) at `FSUAE_COMMIT`, the upstream `fs-uae-3` branch with uaelib function 120 ([FrodeSolheim/fs-uae#398](https://github.com/FrodeSolheim/fs-uae/pull/398)), which takes the PCMCIA card out of the slot and puts it back from the Amiga side, so a test can keep the slot empty. The images set `FSUAE_PCMCIA_HOTPLUG=1` and the label `fsuae.commit`. Locally, `podman build --build-context fs-uae-source=<dir>` builds `<dir>/src` instead of the commit.
+The `fs-uae` program itself is built from [pulchart/fs-uae](https://github.com/pulchart/fs-uae) at `FSUAE_COMMIT`, the upstream `fs-uae-3` branch with uaelib function 120 ([FrodeSolheim/fs-uae#398](https://github.com/FrodeSolheim/fs-uae/pull/398)), which takes the PCMCIA card out of the slot and puts it back from the Amiga side, so a test can keep the slot empty. It also carries the serial timer fix ([FrodeSolheim/fs-uae#399](https://github.com/FrodeSolheim/fs-uae/pull/399)). In cycle exact mode every character written to the serial port queued another timer event, so debug output filled the event queue and could drop an INTENA write, which hangs the emulated system. The images set `FSUAE_PCMCIA_HOTPLUG=1` and the label `fsuae.commit`. Locally, `podman build --build-context fs-uae-source=<dir>` builds `<dir>/src` instead of the commit.
 
 AROS and ApolloOS build from source at their commit, with the pull requests in `AROS_PRS` and `APOLLOOS_PRS` merged on top. Each pull request is pinned to a prefix of its head commit as `<number>:<head commit prefix>`, so a pull request that moved stops the build until its pin is updated. `os-source.sh` does the fetch and the merges.
 
