@@ -99,7 +99,7 @@ podman build --build-context amigaos=/opt/AmigaOS --target amigaos-3.1 -t localh
 podman build --build-context amigaos=/opt/AmigaOS --target amigaos-test --build-arg AMIGAOS_VERSION=3.1 .
 ```
 
-`amigaos-3.2.3` installs 3.2 from its ADFs as its Installer does with the 3.2.3 ROM, then Update 3.2.3, and checks the result against the MD5 list of the update's InstallCheck. `amigaos-3.1` is the Workbench 3.1 disk without its damaged `L/PPaint` drawer, plus `68040.library`. `amigaos-test` boots one with an RDB disk on ide0 and formats and fills that disk.
+`amigaos-3.2.3` installs 3.2 from its ADFs as its Installer does with the 3.2.3 ROM, then Update 3.2.3, and checks the result against the MD5 list of the update's InstallCheck. `amigaos-3.1` is the Workbench 3.1 disk without its damaged `L/PPaint` drawer, plus `68040.library`. Both hold the A1200 and the A600 ROM as `Devs/Kickstarts/A1200.rom` and `A600.rom`, as the installed system is the same for both models; `AMIGA_KICKSTART` names the A1200 one. `amigaos-test` boots one with an RDB disk on ide0 and formats and fills that disk.
 
 ## Licenses
 
