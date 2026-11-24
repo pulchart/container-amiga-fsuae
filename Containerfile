@@ -9,7 +9,7 @@ ARG AROS_PRS="2340:9e8a89a62a02 2390:d5e6776e454d"
 ARG AROS_SOURCE=aros-build
 # renovate: datasource=git-refs depName=https://github.com/ApolloTeam-dev/ApolloOS currentValue=master
 ARG APOLLOOS_COMMIT=6230dc2a8692e422e11a5ec3776f365c97d5a75d
-ARG APOLLOOS_PRS="163:1d5728111681 164:6d51ee88bc83 165:cefa58fa65c7 166:44e256b6e0cf"
+ARG APOLLOOS_PRS="163:1d5728111681 164:6d51ee88bc83 165:cefa58fa65c7 166:44e256b6e0cf 167:a3a965478f28"
 ARG APOLLOOS_SOURCE=apolloos-build
 # AmigaOS that amigaos-test boots: 3.2.3 or 3.1
 ARG AMIGAOS_VERSION=3.2.3
