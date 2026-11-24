@@ -16,10 +16,11 @@ ARG AMIGAOS_VERSION=3.2.3
 # the base stage, or an amiga-fsuae image to build the OS images on
 ARG BASE=base
 # FS-UAE from the upstream fs-uae-3 branch, plus uaelib function 120, which
-# takes the PCMCIA card out of the slot and puts it back
+# takes the PCMCIA card out of the slot and puts it back, and the serial timer
+# fix of pull request 399
 ARG FSUAE_REPO=https://github.com/pulchart/fs-uae.git
-# renovate: datasource=git-refs depName=https://github.com/pulchart/fs-uae currentValue=wip/master/pcmcia-hotplug
-ARG FSUAE_COMMIT=baf0fb4b2eb9bd640078fcde1fa57eb4d11a036e
+# renovate: datasource=git-refs depName=https://github.com/pulchart/fs-uae currentValue=wip/jpu/next
+ARG FSUAE_COMMIT=270ca440c46c80f5337b40003e2b5ef931d537f2
 
 # the FS-UAE source; podman build --build-context fs-uae-source=<dir> takes
 # <dir>/src instead
