@@ -4,12 +4,12 @@
 ARG FEDORA_VERSION=45
 # <OS>_PRS are merged on top of <OS>_COMMIT, <OS>_SOURCE holds the built OS
 # renovate: datasource=git-refs depName=https://github.com/aros-development-team/AROS currentValue=master
-ARG AROS_COMMIT=3d88cce4cbb5c44393618bc68db99bf1ad6ac4fd
-ARG AROS_PRS="2340:a474ec31478f 2390:d71fbc2bb96a"
+ARG AROS_COMMIT=3d417870d375a67f9ccd2e657567a5d40caf6193
+ARG AROS_PRS="2340:a474ec31478f"
 ARG AROS_SOURCE=aros-build
 # renovate: datasource=git-refs depName=https://github.com/ApolloTeam-dev/ApolloOS currentValue=master
 ARG APOLLOOS_COMMIT=6230dc2a8692e422e11a5ec3776f365c97d5a75d
-ARG APOLLOOS_PRS="163:1d5728111681 164:6d51ee88bc83 165:cefa58fa65c7 166:cf30907aef4d 167:a3a965478f28"
+ARG APOLLOOS_PRS="163:fbc38be5255b 164:6d51ee88bc83 165:cefa58fa65c7 166:cf30907aef4d 167:a3a965478f28"
 ARG APOLLOOS_SOURCE=apolloos-build
 # AmigaOS that amigaos-test boots: 3.2.3 or 3.1
 ARG AMIGAOS_VERSION=3.2.3
